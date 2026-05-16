@@ -28,7 +28,8 @@ python extract_features.py
 
 import os, sys, warnings
 warnings.filterwarnings('ignore')
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # 用 CPU, 避免显存不足
+# 注意: DCNv4 等依赖在 import 时就需要 GPU，不能设 CUDA_VISIBLE_DEVICES=-1
+# 如果有 GPU 就用 GPU，比 CPU 快很多
 
 import torch
 import torch.nn as nn
@@ -174,13 +175,18 @@ def extract_features(model_traditional, model_srfd, img_tensor):
         _ = model_traditional(img_tensor)
         _ = model_srfd(img_tensor)
 
+    # 合并两个 dict
+    all_features = {}
+    all_features.update(ext_a.features)
+    all_features.update(ext_b.features)
+
     print(f"\n  提取到的特征:")
-    for name, feat in {**ext_a.features, **ext_b.features}.items():
+    for name, feat in all_features.items():
         print(f"    {name}: shape = {list(feat.shape)}")
 
     ext_a.clear()
     ext_b.clear()
-    return ext_a.features, ext_b.features
+    return all_features
 
 
 # ===============================================================
