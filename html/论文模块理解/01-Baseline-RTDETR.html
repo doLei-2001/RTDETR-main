@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baseline: RT-DETR-r18 原理解析</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; color: #333; padding: 30px; }
+  .container { max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 2em; color: #1a1a2e; margin-bottom: 8px; }
+  h2 { font-size: 1.5em; color: #2d3a6e; margin: 40px 0 20px; padding-bottom: 10px; border-bottom: 3px solid #4a6cf7; }
+  h3 { font-size: 1.2em; color: #3a4a7e; margin: 25px 0 12px; }
+  h4 { color: #4a6cf7; margin: 15px 0 8px; }
+  .subtitle { color: #666; margin-bottom: 30px; font-size: 1.05em; line-height: 1.6; }
+
+  .flow-box { background: white; border-radius: 12px; padding: 20px; margin: 15px 0; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow-x: auto; }
+  .flow-box h4 { margin-top: 0; }
+
+  .arch-diagram { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 10px; font-size: 13px; overflow-x: auto; width: 100%; }
+  .arch-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; justify-content: center; }
+  .arch-row > * { flex-shrink: 0; }
+  .arch-block { background: #4a6cf7; color: white; padding: 10px 18px; border-radius: 8px; font-weight: 500; text-align: center; min-width: 60px; }
+  .arch-block-small { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+  .arch-block-resnet { background: #2d6a4f; color: white; padding: 8px 14px; border-radius: 8px; text-align: center; }
+  .arch-block-ccfm { background: #e07c24; color: white; padding: 8px 14px; border-radius: 8px; text-align: center; }
+  .arch-block-dec { background: #7c3aed; color: white; padding: 8px 14px; border-radius: 8px; text-align: center; }
+  .arch-arrow { color: #999; font-size: 20px; padding: 0 4px; flex-shrink: 0; }
+  .arch-label { font-size: 11px; color: #888; text-align: center; margin-top: 2px; }
+
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 15px 0; }
+  .info-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .info-card h4 { margin-top: 0; color: #2d3a6e; }
+  .info-card ul { padding-left: 20px; line-height: 1.8; }
+  .info-card li { margin-bottom: 6px; }
+
+  .backbone-flow { display: flex; align-items: center; gap: 12px; justify-content: center; flex-wrap: nowrap; padding: 15px; overflow-x: auto; }
+  .backbone-flow > * { flex-shrink: 0; }
+  .backbone-stage { background: #e8eeff; border: 2px solid #4a6cf7; border-radius: 10px; padding: 12px 16px; text-align: center; min-width: 80px; }
+  .backbone-stage .name { font-weight: 600; color: #2d3a6e; }
+  .backbone-stage .detail { font-size: 11px; color: #666; margin-top: 4px; }
+  .backbone-stage .size { font-size: 10px; color: #999; }
+  .arrow-right { color: #4a6cf7; font-size: 24px; flex-shrink: 0; }
+
+  .problem-box { background: #fff3e6; border-left: 4px solid #e8850c; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .problem-box h4 { color: #e8850c; margin: 0 0 8px; }
+  .solution-box { background: #e6f7ee; border-left: 4px solid #1aab6b; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+  th, td { padding: 10px 14px; text-align: center; border: 1px solid #e0e0e0; }
+  th { background: #4a6cf7; color: white; }
+  tr:nth-child(even) { background: #f8f9ff; }
+  tr:hover { background: #eef1ff; }
+
+  .feature-map { display: flex; align-items: center; gap: 10px; justify-content: center; flex-wrap: nowrap; padding: 15px 0; overflow-x: auto; }
+  .feature-map > * { flex-shrink: 0; }
+  .fm-box { border: 2px solid #4a6cf7; border-radius: 6px; padding: 12px 20px; text-align: center; background: #f8f9ff; min-width: 100px; }
+  .fm-box .ch { font-size: 11px; color: #666; }
+  .fm-box .wh { font-size: 14px; font-weight: 600; color: #2d3a6e; }
+
+  .collapse { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+  .collapse::before { content: '▶'; font-size: 12px; transition: transform 0.2s; color: #4a6cf7; }
+  .collapse.open::before { transform: rotate(90deg); }
+  .collapse-content { display: none; padding: 10px 0; }
+  .collapse-content.show { display: block; }
+
+  .code-block { background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 16px; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; overflow-x: auto; margin: 10px 0; }
+  .code-block .comment { color: #6c7086; }
+  .code-block .keyword { color: #cba6f7; }
+  .code-block .func { color: #89b4fa; }
+
+  .detail-toggle { background: none; border: 1px solid #4a6cf7; color: #4a6cf7; padding: 6px 14px; border-radius: 20px; cursor: pointer; font-size: 13px; margin: 5px 0; }
+  .detail-toggle:hover { background: #4a6cf7; color: white; }
+
+  .section-nav { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+  .section-nav a { padding: 8px 16px; background: white; border-radius: 20px; text-decoration: none; color: #4a6cf7; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .section-nav a:hover { background: #4a6cf7; color: white; }
+
+  @media (max-width: 768px) { .info-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="section-nav">
+  <a href="00-目录导航.html">← 返回目录</a>
+  <a href="#arch">整体架构</a>
+  <a href="#backbone">ResNet18主干</a>
+  <a href="#neck">混合编码器</a>
+  <a href="#decoder">解码器</a>
+  <a href="#loss">损失函数</a>
+  <a href="#problems">Baseline不足</a>
+</div>
+
+<h1>📄 Baseline: RT-DETR-r18 原理深度解析</h1>
+<p class="subtitle">RT-DETR（Real-Time Detection Transformer）是百度飞桨团队2024年提出的首个实时端到端目标检测器。它打破了传统DETR类算法计算复杂度高、训练收敛慢的缺陷，在保持Transformer全局建模优势的同时，在速度和精度上超越了同量级YOLO系列。</p>
+
+<div class="problem-box">
+  <h4>🎯 核心贡献</h4>
+  <p>RT-DETR的核心创新在于设计了<strong>混合高效编码器</strong>，将计算密集的自注意力操作与高效卷积融合操作解耦。该模块由<strong>AIFI</strong>（基于注意力的层内特征交互模块）和<strong>CCFM</strong>（跨尺度特征融合模块）两个子模块组成，解决了传统Transformer编码器在处理多尺度特征时的计算爆炸问题。</p>
+</div>
+
+<h2 id="arch">1. 整体架构</h2>
+<div class="flow-box">
+  <div class="arch-diagram">
+    <div class="arch-row">
+      <div class="arch-block" style="background:#2d6a4f;">Input Image<br><span style="font-size:11px;">640×640×3</span></div>
+      <span class="arch-arrow">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <div class="arch-block-resnet" style="border-radius:8px 8px 0 0;">ResNet-18</div>
+        <div style="display:flex;gap:6px;">
+          <div class="arch-block-resnet arch-block-small">Stem<br><span style="font-size:10px;">7×7 conv</span></div>
+          <span style="color:#aaa;font-size:14px;">→</span>
+          <div class="arch-block-resnet arch-block-small">Layer1<br><span style="font-size:10px;">64ch</span></div>
+          <span style="color:#aaa;font-size:14px;">→</span>
+          <div class="arch-block-resnet arch-block-small">Layer2<br><span style="font-size:10px;">128ch</span></div>
+          <span style="color:#aaa;font-size:14px;">→</span>
+          <div class="arch-block-resnet arch-block-small">Layer3<br><span style="font-size:10px;">256ch</span></div>
+          <span style="color:#aaa;font-size:14px;">→</span>
+          <div class="arch-block-resnet arch-block-small">Layer4<br><span style="font-size:10px;">512ch</span></div>
+        </div>
+      </div>
+      <span class="arch-arrow">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div style="display:flex;gap:4px;">
+          <div class="arch-block-resnet arch-block-small">S3<br><span style="font-size:10px;">1/8</span></div>
+          <div class="arch-block-resnet arch-block-small">S4<br><span style="font-size:10px;">1/16</span></div>
+          <div class="arch-block-resnet arch-block-small">S5<br><span style="font-size:10px;">1/32</span></div>
+        </div>
+        <span style="font-size:11px;color:#888;">多尺度特征</span>
+      </div>
+    </div>
+
+    <div class="arch-arrow" style="font-size:24px;padding:4px 0;">↓</div>
+
+    <div style="border:2px dashed #e07c24; border-radius:12px; padding:14px 18px; background:#fffaf0; text-align:center;">
+      <div style="font-weight:600;color:#e07c24;margin-bottom:8px;">🔷 混合高效编码器 (Hybrid Encoder)</div>
+      <div class="arch-row">
+        <div class="arch-block" style="background:#e07c24; min-width:100px;">AIFI<br><span style="font-size:11px;">层内特征交互</span></div>
+        <span class="arch-arrow">⤵</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div style="display:flex;gap:4px;">
+            <div class="arch-block-ccfm arch-block-small">自顶向下</div>
+            <span style="color:#aaa;">↔</span>
+            <div class="arch-block-ccfm arch-block-small">自底向上</div>
+          </div>
+          <span style="font-size:11px;color:#888;">CCFM 跨尺度特征融合</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arch-arrow" style="font-size:24px;padding:4px 0;">↓</div>
+
+    <div style="border:2px dashed #7c3aed; border-radius:12px; padding:14px 18px; background:#f8f4ff; text-align:center;">
+      <div style="font-weight:600;color:#7c3aed;margin-bottom:8px;">🔷 解码器 (Transformer Decoder)</div>
+      <div class="arch-row">
+        <div class="arch-block-dec arch-block-small">查询选择</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block-dec arch-block-small">交叉注意力</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block-dec arch-block-small">自注意力</div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-block-dec arch-block-small">FFN</div>
+      </div>
+      <div style="font-size:11px;color:#888;margin-top:4px;">× 多层堆叠 · 逐层细化边界框</div>
+    </div>
+
+    <div class="arch-arrow" style="font-size:24px;padding:4px 0;">↓</div>
+    <div class="arch-block" style="background:#e83a3a;">预测头<br><span style="font-size:11px;">类别 + 边界框</span></div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-card">
+    <h4>🏗️ 架构组成</h4>
+    <ul>
+      <li><strong>主干网络</strong> (Backbone)：ResNet-18，提取3个尺度特征 S3(1/8), S4(1/16), S5(1/32)</li>
+      <li><strong>混合编码器</strong> (Hybrid Encoder)：AIFI(单尺度自注意力) + CCFM(跨尺度特征融合)</li>
+      <li><strong>解码器</strong> (Decoder)：Transformer解码层 + IoU感知查询选择</li>
+      <li><strong>预测头</strong> (Prediction Head)：分类分支 + 回归分支</li>
+    </ul>
+  </div>
+  <div class="info-card">
+    <h4>📊 模型规格</h4>
+    <ul>
+      <li><strong>参数量</strong>: 19.88M</li>
+      <li><strong>计算量</strong>: 57.0 GFLOPs</li>
+      <li><strong>推理速度</strong>: ~136 FPS (RTX 3090)</li>
+      <li><strong>模型文件</strong>: 77.0 MB</li>
+      <li><strong>mAP50 (VisDrone)</strong>: 37.96%</li>
+      <li><strong>mAP50:95 (VisDrone)</strong>: 22.10%</li>
+    </ul>
+  </div>
+</div>
+
+<h2 id="backbone">2. ResNet-18 主干网络</h2>
+
+<!-- ====== 新增：主干网络的原始不足 + 改进对照 ====== -->
+<div class="flow-box" style="background:#fff8f0; border:2px solid #e8850c;">
+  <div style="display:flex; gap:20px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:200px;">
+      <h4 style="color:#e83a3a; margin:0 0 8px;">❌ Baseline的ResNet-18主干</h4>
+      <ul style="font-size:13px; line-height:1.8;">
+        <li>使用<strong>标准卷积</strong>，空间+通道耦合，参数量大</li>
+        <li>Stem层: 7×7 stride=2 Conv + MaxPool → <strong>激进的4倍下采样</strong></li>
+        <li>输出最低分辨率仅P3(1/8)，无P2高分辨率层</li>
+        <li>卷积核静态固定，无法根据输入自适应调整</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:200px;">
+      <h4 style="color:#1aab6b; margin:0 0 8px;">✅ 我的改进 (DIMB + CAS-FD)</h4>
+      <ul style="font-size:13px; line-height:1.8;">
+        <li>用<strong>C2f_DCMB</strong>替换BasicBlock → 深度可分离+动态权重</li>
+        <li>用<strong>CAS-FD</strong>替换Stem → 三路并行保护小目标</li>
+        <li>额外引入<strong>P2层</strong>特征(1/4) → 更多细粒度信息</li>
+        <li><strong>DKW机制</strong>：根据输入场景自动调整卷积参数</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top:10px; padding:8px 14px; background:#f0e6ff; border-radius:8px; font-size:13px;">
+    <strong>🎯 答辩要点：</strong>"Baseline的ResNet-18使用标准卷积，将空间特征提取与通道融合耦合在一起，参数冗余大。同时Stem层的激进下采样导致小目标信息在进入网络之初就发生了不可逆的像素级丢失。因此，我一方面用DIMB替换主干中的BasicBlock实现轻量化，另一方面用CAS-FD替换Stem层从源头保护小目标特征。"
+  </div>
+</div>
+
+<div class="flow-box">
+  <h4>📐 Baseline网络结构</h4>
+  <div class="backbone-flow">
+    <div class="backbone-stage">
+      <div class="name">Stem</div>
+      <div class="detail">7×7 Conv + MaxPool</div>
+      <div class="size">stride 4 → P1(1/4)</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage">
+      <div class="name">Layer1</div>
+      <div class="detail">BasicBlock ×2</div>
+      <div class="size">64ch → P2(1/4)</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage">
+      <div class="name">Layer2</div>
+      <div class="detail">BasicBlock ×2</div>
+      <div class="size">128ch → S3(1/8)</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage">
+      <div class="name">Layer3</div>
+      <div class="detail">BasicBlock ×2</div>
+      <div class="size">256ch → S4(1/16)</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage">
+      <div class="name">Layer4</div>
+      <div class="detail">BasicBlock ×2</div>
+      <div class="size">512ch → S5(1/32)</div>
+    </div>
+  </div>
+
+  <div class="collapse open" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('show');">
+    <span style="font-weight:600;">📂 查看BasicBlock内部结构</span>
+  </div>
+  <div class="collapse-content show">
+    <div class="code-block">
+<span class="comment"># BasicBlock: ResNet-18的基础构建块</span>
+<span class="keyword">class</span> <span class="func">BasicBlock</span>(nn.Module):
+    expansion = 1
+
+    <span class="keyword">def</span> <span class="func">__init__</span>(self, ch_in, ch_out, stride, shortcut, act='relu', variant='d'):
+        self.branch2a = ConvNormLayer(ch_in, ch_out, <span class="number">3</span>, stride, act=act)   <span class="comment"># 3×3卷积</span>
+        self.branch2b = ConvNormLayer(ch_out, ch_out, <span class="number">3</span>, 1, act=None)          <span class="comment"># 3×3卷积</span>
+        self.short = shortcut连接                                        <span class="comment"># 残差连接</span>
+
+    <span class="keyword">def</span> <span class="func">forward</span>(self, x):
+        out = self.branch2a(x)
+        out = self.branch2b(out)
+        <span class="keyword">return</span> self.act(out + self.short(x))  <span class="comment"># 残差相加 + ReLU</span>
+    </div>
+    <p style="margin-top:8px;color:#666;font-size:14px;">BasicBlock由两个3×3卷积层组成，通过残差连接实现恒等映射。每个卷积层后跟BatchNorm和ReLU激活。</p>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-card">
+    <h4>⚠️ Baseline主干局限性</h4>
+    <ul>
+      <li><strong>特征分辨率不足</strong>：最低特征图S3仅1/8分辨率，微小目标信息严重丢失</li>
+      <li><strong>静态卷积核</strong>：参数量大且无法根据输入动态调整</li>
+      <li><strong>无P2检测层</strong>：缺乏高分辨率细粒度特征用于小目标检测</li>
+      <li><strong>下采样信息损失</strong>：步长卷积导致高频小目标信号不可逆丢失</li>
+    </ul>
+    <div style="margin-top:10px; padding:8px 10px; background:#e6f7ee; border-radius:6px; font-size:12px;">
+      <strong>🔗 对应改进：</strong>
+      <a href="02-SRFD模块.html" style="color:#1aab6b;">CAS-FD模块</a>（替换Stem层）+
+      <a href="05-DIMB模块.html" style="color:#1aab6b;">DIMB模块</a>（替换所有BasicBlock）
+    </div>
+  </div>
+  <div class="info-card">
+    <h4>📐 特征图数据流</h4>
+    <div class="feature-map">
+      <div class="fm-box">
+        <div class="wh">640×640</div>
+        <div class="ch">3ch (RGB)</div>
+      </div>
+      <span style="color:#4a6cf7;font-size:22px;">→</span>
+      <div class="fm-box" style="border-color:#e07c24;">
+        <div class="wh">80×80</div>
+        <div class="ch">128ch (S3)</div>
+      </div>
+      <span style="color:#e07c24;font-size:22px;">→</span>
+      <div class="fm-box" style="border-color:#7c3aed;">
+        <div class="wh">40×40</div>
+        <div class="ch">256ch (S4)</div>
+      </div>
+      <span style="color:#7c3aed;font-size:22px;">→</span>
+      <div class="fm-box" style="border-color:#e83a3a;">
+        <div class="wh">20×20</div>
+        <div class="ch">512ch (S5)</div>
+      </div>
+    </div>
+    <p style="color:#888;font-size:13px;text-align:center;">ResNet18输出三个尺度特征：S3(1/8), S4(1/16), S5(1/32)</p>
+  </div>
+</div>
+
+<h2 id="neck">3. 混合高效编码器</h2>
+
+<!-- ====== 新增：混合编码器的不足总览 ====== -->
+<div class="flow-box" style="background:#fff8f0; border:2px solid #e8850c;">
+  <div style="display:flex; gap:20px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:200px;">
+      <h4 style="color:#e83a3a; margin:0 0 8px;">❌ 原始混合编码器痛点</h4>
+      <ul style="font-size:13px; line-height:1.8;">
+        <li><strong>AIFI</strong>: O(N²)复杂度 → 只能用于最低分辨率S5</li>
+        <li><strong>AIFI</strong>: 标准Softmax自注意力 → 浅层特征缺乏全局上下文</li>
+        <li><strong>CCFM</strong>: 简单Concat拼接 → 固定权重，无法自适应</li>
+        <li><strong>CCFM</strong>: 仅P3/P4/P5三层 → 缺乏P2高分辨率细节层</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:200px;">
+      <h4 style="color:#1aab6b; margin:0 0 8px;">✅ 我的改进 (PASE + ACFP)</h4>
+      <ul style="font-size:13px; line-height:1.8;">
+        <li><strong>PASE</strong>: PolaAttention O(N)复杂度 → 可在更大特征图上建模</li>
+        <li><strong>PASE</strong>: 极性分离保留负值信息 → 密集场景判别力提升</li>
+        <li><strong>ACFP</strong>: MFM自适应加权替代Concat → 动态融合权重</li>
+        <li><strong>ACFP</strong>: SPDConv引入P2层特征 → 细粒度信息补偿</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top:10px; padding:8px 14px; background:#f0e6ff; border-radius:8px; font-size:13px;">
+    <strong>🎯 答辩要点：</strong>"Baseline的混合编码器存在两个核心问题：AIFI的O(N²)复杂度使其只能在最低分辨率上建模，且标准Softmax注意力在大分辨率上计算爆炸；CCFM的简单拼接无法根据场景动态调整各层贡献。因此，我一方面用PASE替换AIFI，以极性感知线性注意力实现O(N)复杂度下的高质量全局建模，另一方面用ACFP替换CCFM，通过P2无损引入和MFM自适应融合构建完整的跨尺度特征保护链。"
+  </div>
+</div>
+
+<h3>3.1 AIFI (Attention-based Intra-scale Feature Interaction)</h3>
+<div class="flow-box">
+  <div class="arch-row" style="justify-content:center;">
+    <div class="backbone-stage" style="min-width:120px;">
+      <div class="name">S5特征</div>
+      <div class="detail">20×20, 512ch</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage" style="min-width:90px;border-color:#e07c24;">
+      <div class="name" style="color:#e07c24;">Input Proj</div>
+      <div class="detail">1×1 Conv</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage" style="min-width:100px;border-color:#7c3aed;">
+      <div class="name" style="color:#7c3aed;">AIFI</div>
+      <div class="detail">MHSA + FFN</div>
+    </div>
+    <span class="arrow-right">→</span>
+    <div class="backbone-stage" style="min-width:80px;">
+      <div class="name">Y5</div>
+      <div class="detail">256ch</div>
+    </div>
+  </div>
+  <p style="margin-top:10px;color:#666;">AIFI仅在<strong>最低分辨率(S5)</strong>特征图上进行全局自注意力计算。因为自注意力的复杂度为O(N²)，只在20×20=400个token上计算，保证了实时性。</p>
+
+  <div class="problem-box" style="margin:10px 0;">
+    <h4>⚠️ 此处的设计矛盾</h4>
+    <p><strong>效率与全局建模的权衡</strong>：仅在S5上进行自注意力，虽然保证了推理速度，但物理上割裂了浅层特征与全局上下文的联系。浅层特征中的高分辨率空间位置细节对于区分密集排列的遮挡目标至关重要，而AIFI无法利用这些信息。</p>
+  </div>
+
+  <!-- ====== AIFI对比框 ====== -->
+  <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:180px; padding:10px; background:#ffe8e8; border-radius:8px;">
+      <div style="font-weight:600; color:#e83a3a; font-size:13px;">AIFI的不足</div>
+      <ul style="font-size:12px; line-height:1.6; padding-left:16px; margin:4px 0 0;">
+        <li>Softmax复杂度O(N²) → 仅S5可用</li>
+        <li>ReLU线性注意力丢负值信号</li>
+        <li>FFN无空间位置感知能力</li>
+        <li>密集场景定位模糊</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:180px; padding:10px; background:#e6f7ee; border-radius:8px;">
+      <div style="font-weight:600; color:#1aab6b; font-size:13px;">PASE的改进</div>
+      <ul style="font-size:12px; line-height:1.6; padding-left:16px; margin:4px 0 0;">
+        <li>PolaAttention O(N)复杂度</li>
+        <li>极性分离保留正负信息</li>
+        <li>ACGF双向空间门控注入位置</li>
+        <li>密集目标判别力提升</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h3>3.2 CCFM (Cross-scale Feature-fusion Module)</h3>
+<div class="flow-box">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px;">
+    <div style="display:flex;gap:20px;align-items:center;">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <div class="backbone-stage" style="min-width:80px;border-color:#2d6a4f;">
+          <div class="name" style="color:#2d6a4f;">S3</div>
+          <div class="detail">80×80</div>
+        </div>
+        <div class="backbone-stage" style="min-width:80px;border-color:#e07c24;">
+          <div class="name" style="color:#e07c24;">S4</div>
+          <div class="detail">40×40</div>
+        </div>
+        <div class="backbone-stage" style="min-width:80px;border-color:#7c3aed;">
+          <div class="name" style="color:#7c3aed;">S5</div>
+          <div class="detail">20×20</div>
+        </div>
+      </div>
+      <span style="font-size:28px;color:#ccc;">↓</span>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+        <div class="backbone-stage" style="min-width:80px;">X3 (P3)</div>
+        <div class="backbone-stage" style="min-width:80px;">F4 (P4)</div>
+        <div class="backbone-stage" style="min-width:80px;">F5 (P5)</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;font-size:13px;color:#888;">
+      <span>自顶向下路径（上采样+融合）</span>
+      <span style="color:#ccc;">|</span>
+      <span>自底向上路径（下采样+融合）</span>
+    </div>
+  </div>
+
+  <div class="problem-box">
+    <h4>⚠️ 此处的设计矛盾</h4>
+    <p><strong>静态融合方式的局限性</strong>：CCFM采用简单的通道拼接或逐元素相加进行特征融合，隐含假设各层特征贡献相等。但在自动驾驶场景中，目标尺度变化剧烈，这种刚性的融合机制无法根据目标实际大小动态调整深层与浅层特征的贡献权重。</p>
+  </div>
+
+  <!-- ====== CCFM对比框 ====== -->
+  <div style="margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:180px; padding:10px; background:#ffe8e8; border-radius:8px;">
+      <div style="font-weight:600; color:#e83a3a; font-size:13px;">CCFM的不足</div>
+      <ul style="font-size:12px; line-height:1.6; padding-left:16px; margin:4px 0 0;">
+        <li>仅P3/P4/P5 → 缺高分辨率信息</li>
+        <li>Concat拼接 → 固定权重</li>
+        <li>无场景自适应能力</li>
+        <li>小目标特征在传播中退化</li>
+      </ul>
+    </div>
+    <div style="flex:1; min-width:180px; padding:10px; background:#e6f7ee; border-radius:8px;">
+      <div style="font-weight:600; color:#1aab6b; font-size:13px;">ACFP的改进</div>
+      <ul style="font-size:12px; line-height:1.6; padding-left:16px; margin:4px 0 0;">
+        <li>SPDConv引入P2层特征(1/4)</li>
+        <li>MFM自适应加权替代Concat</li>
+        <li>根据场景动态调整融合权重</li>
+        <li>CSP-OmniKernel多尺度增强</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h2 id="decoder">4. 解码器与查询选择</h2>
+<div class="flow-box">
+  <div class="info-grid" style="margin:0;">
+    <div class="info-card">
+      <h4>🔍 最小不确定性查询选择</h4>
+      <p style="line-height:1.6;font-size:14px;color:#555;">混合编码器输出的查询特征首先通过分类与回归辅助头进行初步预测，根据综合考量分类得分与定位精度的不确定性度量指标对所有潜在查询进行排序，选取最优的前K个查询作为解码器输入。</p>
+    </div>
+    <div class="info-card">
+      <h4>🔄 解码器迭代细化</h4>
+      <p style="line-height:1.6;font-size:14px;color:#555;">每层解码器由交叉注意力（从编码器特征中提取视觉上下文）和自注意力（建模查询间相互关系）构成。通过多层迭代，不断修正目标的位置坐标与类别预测。</p>
+    </div>
+  </div>
+</div>
+
+<h2 id="loss">5. 损失函数</h2>
+<div class="flow-box">
+  <p style="line-height:1.8;">RT-DETR采用端到端的损失函数，将目标检测建模为预测结果集合与真实目标集合之间的最优匹配问题：</p>
+  <ul style="padding-left:20px;line-height:2;margin:10px 0;">
+    <li><strong>匈牙利算法</strong>：在预测与真实标注之间建立一对一匹配</li>
+    <li><strong>Varifocal Loss</strong>：IoU-aware的分类损失，将预测框与真实框的交并比作为分类标签的软约束</li>
+    <li><strong>L1 Loss + GIoU Loss</strong>：边界框回归损失，加权组合</li>
+  </ul>
+</div>
+
+<h2 id="problems">6. Baseline在面对小目标和密集场景时的不足</h2>
+
+<div class="problem-box">
+  <h4>🔴 问题1：初始下采样阶段的信息丢失</h4>
+  <p>RT-DETR在Stem层使用7×7大核卷积（stride=2）加MaxPool（stride=2）进行快速下采样。对于仅占3-10个像素的微小目标，其边缘、纹理等高频信息在步长卷积的跳跃采样过程中被直接跨越或被邻近背景像素平滑，导致目标特征在进入深层网络之前就已发生难以恢复的<strong>像素级丢失</strong>。</p>
+  <p style="margin-top:8px;color:#e8850c;font-size:14px;"><strong>→ 改进方案：SRFD/CAS-FD模块（见02模块详解）</strong></p>
+</div>
+
+<div class="problem-box">
+  <h4>🔴 问题2：特征金字塔传播中的信息退化</h4>
+  <p>RT-DETR仅使用P3(1/8)、P4(1/16)、P5(1/32)三层特征图。缺乏更高分辨率P2特征层的引入。更重要的是，传统CCFM的固定权重拼接无法根据场景中目标的尺度分布动态调整各层特征的贡献度。</p>
+  <p style="margin-top:8px;color:#e8850c;font-size:14px;"><strong>→ 改进方案：SOEP-MFM/ACFP模块（见03模块详解）</strong></p>
+</div>
+
+<div class="problem-box">
+  <h4>🔴 问题3：密集场景下注意力表达与空间感知不足</h4>
+  <p>AIFI的Softmax自注意力O(N²)复杂度迫使网络仅在低分辨率特征上建模；线性注意力的ReLU截断丢失约50%的负值信息；前馈网络FFN的逐点MLP结构完全忽略空间位置关系。</p>
+  <p style="margin-top:8px;color:#e8850c;font-size:14px;"><strong>→ 改进方案：AIFI-Pola模块（见04模块详解）</strong></p>
+</div>
+
+<div class="problem-box">
+  <h4>🔴 问题4：模型参数冗余与部署效率</h4>
+  <p>ResNet18的标准卷积将空间特征提取与通道信息融合耦合于同一操作中，参数量随通道数呈平方级增长，造成大量计算资源冗余消耗。</p>
+  <p style="margin-top:8px;color:#e8850c;font-size:14px;"><strong>→ 改进方案：DIMB模块（见05模块详解）</strong></p>
+</div>
+
+<div class="solution-box">
+  <h4>✅ 总结：改进思路</h4>
+  <p>针对上述四个问题，本文提出了四个改进模块：</p>
+  <ul style="padding-left:20px;line-height:1.8;margin-top:6px;">
+    <li><strong>SRFD/CAS-FD</strong>：三路并行下采样 + 空间自适应权重 → 保护小目标初始特征</li>
+    <li><strong>SOEP-MFM/ACFP</strong>：P2层SPDConv + MFM自适应融合 + CSP-OmniKernel → 增强金字塔传播</li>
+    <li><strong>AIFI-Pola</strong>：极性感知线性注意力 + 自适应门控FFN → 改善密集场景建模</li>
+    <li><strong>DIMB</strong>：动态Inception混合器 → 轻量化主干网络</li>
+  </ul>
+</div>
+
+<div style="text-align:center;margin-top:40px;padding:20px;background:white;border-radius:12px;">
+  <a href="02-SRFD模块.html" style="display:inline-block;padding:12px 30px;background:#4a6cf7;color:white;border-radius:25px;text-decoration:none;font-size:16px;">下一步：02 SRFD/CAS-FD 下采样模块详解 →</a>
+</div>
+
+</div>
+</body>
+</html>

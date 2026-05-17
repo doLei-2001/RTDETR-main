@@ -293,16 +293,16 @@ def visualize(image_path, features, output_dir):
 
     # ======== 图2: 传统 Stem P2 ========
     fig2, axes2 = plt.subplots(1, 2, figsize=(14, 5))
-    # 左: 纯热力图
+    # 左: 模型"看到"的特征强度分布 — 纯热力图
     im2a = axes2[0].imshow(hm_trad_p2, cmap=cmap_heat, interpolation='bilinear')
-    axes2[0].set_title('传统 Stem P2 特征热力图\n(ConvNormLayer×3 + MaxPool)', fontsize=11)
+    axes2[0].set_title('⬅ 模型特征激活图\n(红=强响应 蓝=弱/无响应)', fontsize=12, fontweight='bold')
     axes2[0].axis('off')
-    plt.colorbar(im2a, ax=axes2[0], fraction=0.046, pad=0.04)
-    # 右: 叠加到原图
+    plt.colorbar(im2a, ax=axes2[0], fraction=0.046, pad=0.04, label='激活强度')
+    # 右: 热力图叠加原图 — 定位哪些目标被"看到"
     axes2[1].imshow(overlay_trad_p2)
-    axes2[1].set_title('热力图叠加原图\n红色=高响应 蓝色=低响应', fontsize=11)
+    axes2[1].set_title('⬅ 叠加原图 → 定位目标\n(红色区域=模型关注, 蓝色区域=被忽略)', fontsize=12, fontweight='bold')
     axes2[1].axis('off')
-    fig2.suptitle('传统 Stem → P2/4 特征响应', fontsize=14, fontweight='bold',
+    fig2.suptitle('传统 Stem (步长卷积+MaxPool) → P2/4', fontsize=15, fontweight='bold',
                   color='#d93025')
     fig2.tight_layout()
     path2 = os.path.join(output_dir, '02_传统Stem_P2特征热力图.png')
@@ -313,13 +313,13 @@ def visualize(image_path, features, output_dir):
     # ======== 图3: CAS-FD P2 ========
     fig3, axes3 = plt.subplots(1, 2, figsize=(14, 5))
     im3a = axes3[0].imshow(hm_srfd_p2, cmap=cmap_heat, interpolation='bilinear')
-    axes3[0].set_title('CAS-FD (SRFD) P2 特征热力图\n(DetB+SemB+SalB 三路并行)', fontsize=11)
+    axes3[0].set_title('⬅ 模型特征激活图\n(红=强响应 蓝=弱/无响应)', fontsize=12, fontweight='bold')
     axes3[0].axis('off')
-    plt.colorbar(im3a, ax=axes3[0], fraction=0.046, pad=0.04)
+    plt.colorbar(im3a, ax=axes3[0], fraction=0.046, pad=0.04, label='激活强度')
     axes3[1].imshow(overlay_srfd_p2)
-    axes3[1].set_title('热力图叠加原图\n红色=高响应 蓝色=低响应', fontsize=11)
+    axes3[1].set_title('⬅ 叠加原图 → 定位目标\n(红色区域=模型关注, 蓝色区域=被忽略)', fontsize=12, fontweight='bold')
     axes3[1].axis('off')
-    fig3.suptitle('CAS-FD (SRFD) → P2/4 特征响应', fontsize=14, fontweight='bold',
+    fig3.suptitle('CAS-FD [本文方法] (三路并行+Cut无损) → P2/4', fontsize=15, fontweight='bold',
                   color='#0f9d58')
     fig3.tight_layout()
     path3 = os.path.join(output_dir, '03_CAS-FD_P2特征热力图.png')
@@ -330,13 +330,13 @@ def visualize(image_path, features, output_dir):
     # ======== 图4: 传统 P3 ========
     fig4, axes4 = plt.subplots(1, 2, figsize=(14, 5))
     im4a = axes4[0].imshow(hm_trad_p3, cmap=cmap_heat, interpolation='bilinear')
-    axes4[0].set_title('传统主干 P3 特征热力图\n(Blocks BasicBlock×2, P3/8)', fontsize=11)
+    axes4[0].set_title('⬅ 模型特征激活图\n(红=强响应 蓝=弱/无响应)', fontsize=12, fontweight='bold')
     axes4[0].axis('off')
-    plt.colorbar(im4a, ax=axes4[0], fraction=0.046, pad=0.04)
+    plt.colorbar(im4a, ax=axes4[0], fraction=0.046, pad=0.04, label='激活强度')
     axes4[1].imshow(overlay_trad_p3)
-    axes4[1].set_title('热力图叠加原图', fontsize=11)
+    axes4[1].set_title('⬅ 叠加原图 → 定位目标\n(红色区域=模型关注, 蓝色区域=被忽略)', fontsize=12, fontweight='bold')
     axes4[1].axis('off')
-    fig4.suptitle('传统 ResNet-18 主干 → P3/8 特征响应', fontsize=14, fontweight='bold',
+    fig4.suptitle('传统 ResNet-18 主干 → P3/8', fontsize=15, fontweight='bold',
                   color='#d93025')
     fig4.tight_layout()
     path4 = os.path.join(output_dir, '04_传统主干_P3特征热力图.png')
@@ -347,13 +347,13 @@ def visualize(image_path, features, output_dir):
     # ======== 图5: CAS-FD P3 ========
     fig5, axes5 = plt.subplots(1, 2, figsize=(14, 5))
     im5a = axes5[0].imshow(hm_srfd_p3, cmap=cmap_heat, interpolation='bilinear')
-    axes5[0].set_title('CAS-FD + LDC P3 特征热力图\n(C2f_DCMB, P3/8)', fontsize=11)
+    axes5[0].set_title('⬅ 模型特征激活图\n(红=强响应 蓝=弱/无响应)', fontsize=12, fontweight='bold')
     axes5[0].axis('off')
-    plt.colorbar(im5a, ax=axes5[0], fraction=0.046, pad=0.04)
+    plt.colorbar(im5a, ax=axes5[0], fraction=0.046, pad=0.04, label='激活强度')
     axes5[1].imshow(overlay_srfd_p3)
-    axes5[1].set_title('热力图叠加原图', fontsize=11)
+    axes5[1].set_title('⬅ 叠加原图 → 定位目标\n(红色区域=模型关注, 蓝色区域=被忽略)', fontsize=12, fontweight='bold')
     axes5[1].axis('off')
-    fig5.suptitle('CAS-FD + LDC 主干 → P3/8 特征响应', fontsize=14, fontweight='bold',
+    fig5.suptitle('CAS-FD + LDC 主干 [本文方法] → P3/8', fontsize=15, fontweight='bold',
                   color='#0f9d58')
     fig5.tight_layout()
     path5 = os.path.join(output_dir, '05_CAS-FD_P3特征热力图.png')

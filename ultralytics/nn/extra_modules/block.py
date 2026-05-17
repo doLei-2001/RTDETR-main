@@ -4397,9 +4397,32 @@ class C2f_PPA(C2f):
 
 ######################################## Parallelized Patch-Aware Attention Module end ########################################
 
+######################################## CAS-FD / SRFD (Content-Aware Selective Feature Downsampling) start ########################################
+# 【论文映射】对应论文3.3.1节 CAS-FD (内容感知选择性特征下采样模块)
+# SRFD = Staged Robust Feature Downsampling
+# 包含:
+# - Cut: 像素重排下采样 = DetB细节分支 (Pixel Unshuffle)
+# - SRFD: 完整CAS-FD模块 (DetB + SemB + SalB + SWN)
+# - DRFD: 简化版CAS-FD，用于特征金字塔下采样
+# 配置文件: rtdetr-SRFD.yaml
 ######################################## Deep feature downsampling start ########################################
 
 class Cut(nn.Module):
+    """Cut：像素重排下采样（Pixel Unshuffle）
+
+    【论文映射】对应论文3.3.1节 CAS-FD 中的细节分支 (Detail Branch, DetB)
+
+    功能：将空间维度的像素映射至通道维度（Pixel Unshuffle），完整保留小目标的像素级信息。
+    原理：输入特征图在空间上按2x2网格拆分，将4个子图在通道维度拼接，
+    再通过1x1卷积融合通道信息实现降采样。
+    优势：相对于步长卷积/池化，该操作无像素跳跃，不丢失任何高频信息。
+    对于自动驾驶数据集中仅占数个像素的微小目标，建立了原始光度信息的直连通道。
+
+    CAS-FD = Content-Aware Selective Feature Downsampling (内容感知选择性特征下采样)
+
+    输入: x ∈ [B, C, H, W]    输出: [B, out_channels, H/2, W/2]
+    下采样方式：Pixel Unshuffle（空间→通道映射，无信息丢失）
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.conv_fusion = nn.Conv2d(in_channels * 4, out_channels, kernel_size=1, stride=1)
@@ -4416,6 +4439,34 @@ class Cut(nn.Module):
         return x
 
 class SRFD(nn.Module):
+    """SRFD: Staged Robust Feature Downsampling（分阶段鲁棒特征下采样）
+
+    【论文映射】对应论文3.3.1节 CAS-FD (Content-Aware Selective Feature Downsampling)
+    CAS-FD = 内容感知选择性特征下采样模块
+
+    设计目标：替代原始主干网络的Stem层与初步下采样层，从特征提取源头保护小目标信息。
+    解决传统步长下采样导致的微小目标像素级不可逆丢失问题。
+
+    网络结构（分两阶段下采样，从HxW降至H/4 x W/4）：
+
+    【阶段1: 原始→2x下采样】
+    三路并行分支：
+      (1) DetB - 细节分支 (通过Cut, Pixel Unshuffle): 保留完整像素级信息
+      (2) SemB - 语义分支 (通过步长分组卷积ConvD): 学习几何形状与上下文模式
+    两路经Concat+1x1卷积融合 → [B, C/2, H/2, W/2]
+
+    【阶段2: 2x→4x下采样】
+    三路并行分支：
+      (1) ConvD - 语义分支（步长分组卷积）: 提取抽象语义
+      (2) MaxD - 显著性分支 (MaxPooling): 保留显著特征，过滤背景噪声
+      (3) CutD - 细节分支（通过Cut, Pixel Unshuffle）: 保持像素完整性
+    三路经Concat+1x1卷积融合 → [B, C, H/4, W/4]
+
+    【空间自适应融合(SWN)】两阶段的fusion层相当于论文中的空间权重网络(SWN)，
+    通过可学习的1x1卷积根据输入内容动态调整各分支贡献。
+
+    输入: x ∈ [B, 3, H, W]     输出: x ∈ [B, out_channels, H/4, W/4]
+    """
     def __init__(self, in_channels=3, out_channels=96):
         super().__init__()
         out_c14 = int(out_channels / 4)  # out_channels / 4
@@ -4441,40 +4492,53 @@ class SRFD(nn.Module):
         self.fusion2 = nn.Conv2d(out_channels * 3, out_channels, kernel_size=1, stride=1)
 
     def forward(self, x):
-        # 7x7 convolution with stride 1 for feature reinforcement, Channels from 3 to 1/4C.
+        # 双卷积感知预处理：7x7 stride=1 初步特征增强，通道数从3压缩至out_channels/4
         x = self.conv_init(x)  # x = [B, C/4, H, W]
 
-    # original size to 2x downsampling layer
+        # ========== 阶段1: 原始分辨率 → 2x下采样 ==========
         c = x                   # c = [B, C/4, H, W]
-        # CutD
+        # 【DetB - 细节分支】Pixel Unshuffle保持像素完整性
         c = self.cut_c(c)       # c = [B, C, H/2, W/2] --> [B, C/2, H/2, W/2]
-        # ConvD
+        # 【SemB - 语义分支】步长分组卷积提取上下文模式
         x = self.conv_1(x)      # x = [B, C/4, H, W] --> [B, C/2, H/2, W/2]
         x = self.conv_x1(x)     # x = [B, C/2, H/2, W/2]
         x = self.batch_norm_x1(x)
-        # Concat + conv
+        # 【SWN - 空间自适应融合】DetB + SemB 拼接后1x1卷积融合
         x = torch.cat([x, c], dim=1)    # x = [B, C, H/2, W/2]
         x = self.fusion1(x)     # x = [B, C, H/2, W/2] --> [B, C/2, H/2, W/2]
 
-    # 2x to 4x downsampling layer
+        # ========== 阶段2: 2x → 4x下采样 ==========
         r = x                   # r = [B, C/2, H/2, W/2]
         x = self.conv_2(x)      # x = [B, C/2, H/2, W/2] --> [B, C, H/2, W/2]
         m = x                   # m = [B, C, H/2, W/2]
-        # ConvD
+        # 【ConvD - 语义分支】步长分组卷积提取抽象语义
         x = self.conv_x2(x)     # x = [B, C, H/4, W/4]
         x = self.batch_norm_x2(x)
-        # MaxD
+        # 【MaxD - 显著性分支】MaxPooling保留显著特征，过滤低频背景噪声
         m = self.max_m(m)       # m = [B, C, H/4, W/4]
         m = self.batch_norm_m(m)
-        # CutD
+        # 【CutD - 细节分支】Pixel Unshuffle保持像素完整性
         r = self.cut_r(r)       # r = [B, C, H/4, W/4]
-        # Concat + conv
+        # 【SWN - 空间自适应融合】ConvD + CutD + MaxD 三路拼接后1x1卷积融合
         x = torch.cat([x, r, m], dim=1)  # x = [B, C*3, H/4, W/4]
         x = self.fusion2(x)     # x = [B, C*3, H/4, W/4] --> [B, C, H/4, W/4]
         return x                # x = [B, C, H/4, W/4]
 
 # Deep feature downsampling
 class DRFD(nn.Module):
+    """DRFD: Deep Robust Feature Downsampling（深度鲁棒特征下采样）
+
+    【论文映射】ACFP网络中的下采样模块，用于特征金字塔自顶向下路径中的下采样。
+    采用CutD + ConvD + MaxD 三路并行 + 自适应融合的思想（同CAS-FD的简约版）。
+
+    功能：对特征图进行2x下采样，同时保持特征完整性。
+    三路并行：
+    - CutD (Pixel Unshuffle): 像素重排保留细节
+    - ConvD (步长分组卷积): 提取语义
+    - MaxD (MaxPooling): 保留显著特征
+
+    输入: x ∈ [B, C, H, W]     输出: [B, 2C, H/2, W/2]  (通道翻倍，空间减半)
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.cut_c = Cut(in_channels=in_channels, out_channels=out_channels)
@@ -5965,10 +6029,35 @@ class GLSA(nn.Module):
 
 ######################################## Global-to-Local Spatial Aggregation Module end ########################################
 
+######################################## ACFP (Adaptive Collaborative Fusion Pyramid) - SPDConv start ########################################
+# 【论文映射】对应论文3.3.2节 ACFP (自适应协同融合金字塔)
+# ACFP组成模块:
+# 1. SPDConv (这里): 空间-深度卷积，用于P2特征的无损降采样引入
+# 2. MFM (DCMPNet.py): 互促融合 = AWM自适应加权模块
+# 3. OmniKernel/CSPOmniKernel (下面): CAFE多尺度特征增强
+# 4. SNI (上面): Soft Nearest Interpolation上采样
+# 配置: rtdetr-SOEP-MFM.yaml, rtdetr-SOEP-MFM-RFPN.yaml
 ######################################## SPD-Conv start ########################################
 
 class SPDConv(nn.Module):
-    # Changing the dimension of the Tensor
+    """SPDConv: Space-to-Depth Convolution（空间-深度卷积）
+
+    【论文映射】对应论文3.3.2节 ACFP 中的"空间-深度卷积模块"
+    ACFP通过该模块将P2层特征无损引入特征金字塔。
+
+    功能：将空间维度的像素映射至通道维度（Space-to-Depth），
+    与Cut/Pixel Unshuffle操作相同，在降低空间分辨率的同时
+    不丢失任何像素级信息，确保细粒度信息在尺度转换中零损失传递。
+
+    与普通步长卷积的区别：步长卷积存在跳跃采样导致信息丢失，
+    SPDConv将所有像素保留在通道维度，实现无损降采样。
+
+    在ACFP中的位置：接收主干网络P2层输出 → SPDConv →
+    AWM自适应加权融合 → CAFE增强 → 送入后续特征金字塔
+
+    输入: x ∈ [B, inc, H, W]   输出: [B, ouc, H/2, W/2]
+    降采样方式: Space-to-Depth (空间→通道，无信息丢失)
+    """
     def __init__(self, inc, ouc, dimension=1):
         super().__init__()
         self.d = dimension
@@ -5981,6 +6070,12 @@ class SPDConv(nn.Module):
 
 ######################################## SPD-Conv end ########################################
 
+######################################## ACFP - OmniKernel / CAFE (Cross-scale Adaptive Feature Enhancement) start ########################################
+# 【论文映射】对应论文3.3.2节 ACFP 中的 CAFE 模块
+# CAFE = Cross-scale Adaptive Feature Enhancement (多尺度特征增强模块)
+# 内部集成 OmniKernel (全局+局部+大核三路并行)，
+# CSPOmniKernel 采用部分通道处理(25%通道OmniKernel, 75%恒等映射)降低计算量
+# FGM = Frequency Gating Module (频域门控)
 ######################################## Omni-Kernel Network for Image Restoration [AAAI-24] start ########################################
 
 class FGM(nn.Module):
@@ -6010,6 +6105,28 @@ class FGM(nn.Module):
         return out * self.alpha + x * self.beta
 
 class OmniKernel(nn.Module):
+    """OmniKernel：全核多尺度特征提取模块
+
+    【论文映射】对应论文3.3.2节 ACFP 中 CAFE (Cross-scale Adaptive Feature Enhancement)
+    模块内的 OmniKernel 部分，用于多尺度特征的增强提取。
+
+    设计思路：集成全局(GAP)、局部(3x3DWConv)和大核(7x7DWConv)三个并行分支，
+    同时引入频率通道注意力(FCA)和空间通道注意力(SCA)进行特征校准。
+
+    三个并行分支：
+    - dw_33 (31x31 DWConv): 大核卷积分支，捕获大范围空间关系
+    - dw_13 (1x31 DWConv): 水平带状卷积分支，捕获水平方向长程依赖
+    - dw_31 (31x1 DWConv): 垂直带状卷积分支，捕获垂直方向空间关系
+    - dw_11 (1x1 DWConv): 恒等映射分支，保留原始特征
+    - FCA (频率通道注意力): 在频域进行通道注意力校准
+    - SCA (空间通道注意力): 在空域进行通道注意力校准
+    - FGM (Frequency Gating Module): 频域门控模块
+
+    在ACFP中的位置：P2特征经SPDConv下采样 → AWM加权融合 →
+    CAFE模块(OmniKernel + CSP部分通道) 增强特征 → 输出至特征金字塔
+
+    输入/输出: x ∈ [B, dim, H, W]   输出: [B, dim, H, W]
+    """
     def __init__(self, dim) -> None:
         super().__init__()
 
@@ -6058,6 +6175,22 @@ class OmniKernel(nn.Module):
         return self.out_conv(out)
 
 class CSPOmniKernel(nn.Module):
+    """CSPOmniKernel：跨阶段部分通道OmniKernel模块
+
+    【论文映射】对应论文3.3.2节 ACFP 中 CAFE 模块的"部分通道处理机制"
+    论文中描述：借鉴部分卷积(Partial Convolution)思想，
+    仅对25%的通道应用OmniKernel模块，其余75%通道采用恒等映射直接传递。
+
+    设计理念：将输入通道分为两部分：
+    - 主分支 (25%): 经过OmniKernel进行深度多尺度特征融合
+    - 次分支 (75%): 恒等映射保留原始特征
+    两部分拼接后再进行1x1卷积融合，在保证特征增强效果的同时控制计算量。
+
+    这种部分通道处理机制有效降低了计算复杂度（约75%通道跳过OmniKernel），
+    同时保留了足够的特征增强能力。
+
+    输入/输出: x ∈ [B, dim, H, W]   输出: [B, dim, H, W]
+    """
     def __init__(self, dim, e=0.25):
         super().__init__()
         self.e = e
@@ -10872,10 +11005,46 @@ class C2f_Faster_KAN(C2f):
 
 ######################################## ICLR2025 Kolmogorov–Arnold Transformer end ########################################
 
+######################################## LDC (Lightweight Dynamic Inception Conv Mixer) start ########################################
+# 【论文映射】对应论文第4章 LDC模块 (DynamicInceptionMixer)
+# LDC = Lightweight Dynamic Inception Convolution Mixer (动态Inception混合器)
+# 用于替换ResNet18主干中的BasicBlock，实现模型轻量化
+# 包含: MBDC(多分支深度卷积子模块) + CSM(通道分割混合器) + DKW(动态卷积核权重)
+# - DynamicInceptionDWConv2d: MBDC核心，三路并行深度卷积分支 + DKW动态权重
+# - DynamicInceptionMixer: CSM通道分割 + 多尺度DynamicInceptionDWConv2d
+# - DynamicIncMixerBlock: 完整Block（Mixer + ConvolutionalGLU）
+# - C2f_DCMB: C2f封装，用于YOLO/RT-DETR主干网络
+# 配置文件: rtdetr-C2f-DIMB.yaml
 ######################################## DynamicConvMixerBlock start ########################################
 
 class DynamicInceptionDWConv2d(nn.Module):
-    """ Dynamic Inception depthweise convolution
+    """DynamicInceptionDWConv2d: 动态Inception深度可分离卷积核心算子
+
+    【论文映射】对应论文4.2.2节 LDC 中的 MBDC (Multi-Branch Depthwise Convolution)
+    LDC = Lightweight Dynamic Inception Convolution Mixer (动态Inception混合器)
+    MBDC = 多分支深度卷积子模块
+
+    设计目标：替代标准卷积，通过多分支深度卷积 + 动态卷积核权重机制(DKW)，
+    在轻量化前提下实现多尺度特征的自适应提取。
+
+    三路并行深度卷积分支（论文图4.1）：
+    1.【方形卷积分支 (KxK DWConv)】默认3x3深度卷积
+       负责提取局部方形邻域内的纹理与结构特征，感知目标边缘与形状
+
+    2.【横向带状卷积分支 (1xM DWConv)】默认1x11非对称深度卷积
+       捕获水平方向的长程依赖关系，感知道路走向、车道线等横向结构
+
+    3.【纵向带状卷积分支 (Mx1 DWConv)】默认11x1非对称深度卷积
+       捕获垂直方向的空间关系，与横向分支正交互补
+
+    【DKW - Dynamic Kernel Weights 动态卷积核权重机制】(论文公式4.2-4.3)
+    - GAP提取全局统计特征 → 1x1卷积生成三路权重 → Softmax归一化
+    - 使网络根据输入场景自适应调整各尺度分支贡献
+    - w_i = Softmax(Conv1x1(AvgPool(X)))_i
+
+    输出融合: Y = SiLU(BN(Σ w_i · DWConv_i(X)))
+
+    输入: x ∈ [B, C, H, W]    输出: [B, C, H, W]
     """
     def __init__(self, in_channels, square_kernel_size=3, band_kernel_size=11):
         super().__init__()
@@ -10901,16 +11070,37 @@ class DynamicInceptionDWConv2d(nn.Module):
         return self.act(self.bn(x))
 
 class DynamicInceptionMixer(nn.Module):
+    """DynamicInceptionMixer: 动态Inception混合器（含CSM通道分割）
+
+    【论文映射】对应论文4.2.3节 LDC 中的 CSM (Channel Split Mixer)
+    CSM = 通道分割混合器
+
+    设计思路：借鉴通道分割策略(ShuffleNet v2)，将输入特征在通道维度均分，
+    分别送入不同尺度的MBDC并行处理，再通过1x1逐点卷积进行跨组信息融合。
+
+    【CSM通道分割策略】(论文4.2.3节)
+    将输入特征在通道维度均分为两组(各C/2通道)：
+    - 每组由独立的DynamicInceptionDWConv2d处理不同尺度特征
+    - 两组输出在通道维度拼接
+    - 1x1逐点卷积进行跨组信息融合，恢复原始通道维度
+
+    优势：
+    - 每路处理单元的输入通道减半，深度卷积计算量降低约50%
+    - 多组独立处理 + 跨组融合，保持特征表达宽度的同时削减运算开销
+    - 不同kernel_size处理不同尺度，如kernels=[3,5]覆盖多尺度范围
+
+    输入: x ∈ [B, C, H, W]    输出: [B, C, H, W]
+    """
     def __init__(self, channel=256, kernels=[3, 5]):
         super().__init__()
         self.groups = len(kernels)
         min_ch = channel // 2
-        
+
         self.convs = nn.ModuleList([])
         for ks in kernels:
             self.convs.append(DynamicInceptionDWConv2d(min_ch, ks, ks * 3 + 2))
         self.conv_1x1 = Conv(channel, channel, k=1)
-        
+
     def forward(self, x):
         _, c, _, _ = x.size()
         x_group = torch.split(x, [c // 2, c // 2], dim=1)
@@ -10919,6 +11109,22 @@ class DynamicInceptionMixer(nn.Module):
         return x
 
 class DynamicIncMixerBlock(nn.Module):
+    """DynamicIncMixerBlock: 动态Inception混合器Block
+
+    【论文映射】对应论文4.2节 LDC 模块的完整Block结构
+    用于替换ResNet18主干中的BasicBlock。
+
+    结构（类Transformer的预归一化设计）：
+    1. BN → DynamicInceptionMixer (含MBDC+CSM) → LayerScale → DropPath → +残差
+    2. BN → ConvolutionalGLU (卷积门控线性单元MLP) → LayerScale → DropPath → +残差
+
+    设计优势：
+    - 多分支深度卷积 + 通道分割 + 动态权重 → 轻量级多尺度特征提取
+    - LayerScale + DropPath: 训练稳定性增强
+    - 残差连接: 保证梯度稳定传播
+
+    输入: x ∈ [B, C, H, W]    输出: [B, C, H, W]
+    """
     def __init__(self, dim, drop_path=0.0):
         super().__init__()
         self.norm1 = nn.BatchNorm2d(dim)
@@ -10926,7 +11132,7 @@ class DynamicIncMixerBlock(nn.Module):
         self.mixer = DynamicInceptionMixer(dim)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.mlp = ConvolutionalGLU(dim)
-        layer_scale_init_value = 1e-2            
+        layer_scale_init_value = 1e-2
         self.layer_scale_1 = nn.Parameter(
             layer_scale_init_value * torch.ones((dim)), requires_grad=True)
         self.layer_scale_2 = nn.Parameter(
@@ -10938,6 +11144,17 @@ class DynamicIncMixerBlock(nn.Module):
         return x
 
 class C2f_DCMB(C2f):
+    """C2f_DCMB: C2f封装 + DynamicIncMixerBlock
+
+    【论文映射】对应论文4.2节 LDC 在主干网络中的使用方式
+    通过C2f结构包装DynamicIncMixerBlock，用于替换ResNet18主干中的BasicBlock阶段。
+
+    在YOLO/RT-DETR网络中，C2f是一种跨阶段部分连接(CSP)结构，
+    将输入分为两路：一路恒等映射，一路经DynamicIncMixerBlock处理，
+    最后拼接融合，实现高效的特征提取。
+
+    配置文件: rtdetr-C2f-DIMB.yaml
+    """
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         super().__init__(c1, c2, n, shortcut, g, e)
         self.m = nn.ModuleList(DynamicIncMixerBlock(self.c) for _ in range(n))

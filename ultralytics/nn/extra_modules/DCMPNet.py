@@ -211,7 +211,34 @@ class LEGM(nn.Module):
         x = identity + x
         return x
 
+# ======================================== ACFP-AWM: MFM (Mutual Promotion Fusion Module) ========================================
+# 【论文映射】对应论文3.3.2节 ACFP 中的 AWM (Adaptive Weighting Module / 自适应加权模块)
+# 功能: 动态学习多路特征(P2/Y4/P3)的融合权重，替代传统固定权重拼接
+# 配置: rtdetr-SOEP-MFM.yaml
+# ======================================== ACFP-AWM: MFM ========================================
+
 class MFM(nn.Module):
+    """MFM: Mutual Promotion Fusion Module (互促融合模块)
+
+    【论文映射】对应论文3.3.2节 ACFP 中的 AWM (Adaptive Weighting Module)
+    AWM = 自适应加权模块，用于动态学习多尺度特征的融合权重。
+
+    功能：接收多路输入特征(如P2增强特征、Y4中间特征、P3原始特征)，
+    通过全局平均池化提取全局统计信息，经轻量级MLP生成各路的通道注意力权重，
+    再通过Softmax归一化确保权重和为1，实现自适应加权融合。
+
+    论文公式(3.1-3.2)对应：
+    1. 将多路特征投影到统一通道维度
+    2. 逐元素相加 + 全局平均池化 → 全局上下文向量
+    3. 两层MLP + Softmax → 各分支自适应权重
+    4. 权重与特征逐元素相乘并求和 → 融合特征
+
+    在ACFP中的位置：SPDConv下采样的P2特征 + Y4中间特征 + P3原始特征
+    → MFM/AWM 自适应加权融合 → CAFE (CSPOmniKernel) 增强
+
+    输入: in_feats_[n] 多路特征, 每路 [B, Ci, H, W]
+    输出: [B, dim, H, W] 自适应融合后的特征
+    """
     def __init__(self, inc, dim, reduction=8):
         super(MFM, self).__init__()
 
