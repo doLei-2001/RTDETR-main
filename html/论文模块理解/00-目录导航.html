@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AD-DETR 论文答辩 - 模型导航</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; color: #333; padding: 40px 20px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { text-align: center; font-size: 2.2em; margin-bottom: 10px; color: #1a1a2e; }
+  .subtitle { text-align: center; color: #666; margin-bottom: 40px; font-size: 1.1em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; }
+  .card { background: white; border-radius: 16px; padding: 28px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); transition: all 0.3s ease; border: 2px solid transparent; cursor: pointer; }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 8px 30px rgba(0,0,0,0.12); border-color: #4a6cf7; }
+  .card-icon { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 16px; }
+  .card h3 { font-size: 1.2em; margin-bottom: 10px; color: #1a1a2e; }
+  .card p { color: #666; font-size: 0.9em; line-height: 1.6; }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.75em; margin-top: 12px; }
+  .tag-blue { background: #e8eeff; color: #4a6cf7; }
+  .tag-green { background: #e6f7ee; color: #1aab6b; }
+  .tag-orange { background: #fff3e6; color: #e8850c; }
+  .tag-red { background: #ffe8e8; color: #e83a3a; }
+  .tag-purple { background: #f0e6ff; color: #7c3aed; }
+  .nav-bar { display: flex; justify-content: center; gap: 12px; margin-bottom: 40px; flex-wrap: wrap; }
+  .nav-btn { padding: 8px 20px; border-radius: 25px; border: none; background: white; color: #4a6cf7; font-size: 0.9em; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-decoration: none; }
+  .nav-btn:hover { background: #4a6cf7; color: white; transform: translateY(-2px); }
+  .intro { text-align: center; max-width: 800px; margin: 0 auto 40px; line-height: 1.8; color: #555; font-size: 1.05em; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🧭 AD-DETR 模型架构导航</h1>
+  <p class="subtitle">RT-DETR改进算法 · 面向自动驾驶/无人机目标检测 · 论文答辩辅助</p>
+
+  <div class="intro">
+    本导航站从 <strong>Baseline原理 → Baseline不足 → 模块改进 → 整体架构</strong> 的逻辑链条出发，<br>
+    通过交互式可视化帮助理解每一部分的设计动机与数据流动过程。
+  </div>
+
+  <div class="nav-bar">
+    <a href="01-Baseline-RTDETR.html" class="nav-btn">📄 01 Baseline原理解析</a>
+    <a href="02-SRFD模块.html" class="nav-btn">🔄 02 SRFD/CAS-FD下采样</a>
+    <a href="03-SOEP-MFM-ACFP模块.html" class="nav-btn">🏗️ 03 SOEP-MFM/ACFP金字塔</a>
+    <a href="04-AIFI-Pola模块.html" class="nav-btn">🧠 04 AIFI-Pola注意力</a>
+    <a href="05-DIMB模块.html" class="nav-btn">⚡ 05 DIMB轻量化</a>
+    <a href="06-整体架构.html" class="nav-btn">🌟 06 完整AD-DETR架构</a>
+  </div>
+
+  <div class="grid">
+    <div class="card" onclick="location.href='01-Baseline-RTDETR.html'">
+      <div class="card-icon" style="background:#e8eeff;">📄</div>
+      <h3>01 Baseline原理解析</h3>
+      <p>RT-DETR-r18的整体架构、ResNet18主干网络、AIFI编码器、CCFM特征融合、解码器与查询选择机制的详细数据流向图。</p>
+      <span class="tag tag-blue">核心基础</span>
+      <span class="tag tag-orange">必须掌握</span>
+    </div>
+
+    <div class="card" onclick="location.href='02-SRFD模块.html'">
+      <div class="card-icon" style="background:#fff3e6;">🔄</div>
+      <h3>02 SRFD / CAS-FD 下采样</h3>
+      <p>从"下采样信息丢失"问题出发，详解三路并行下采样(ConvD/MaxD/CutD)与空间自适应权重网络的设计原理与数据流动。</p>
+      <span class="tag tag-orange">问题驱动</span>
+      <span class="tag tag-green">小目标保护</span>
+    </div>
+
+    <div class="card" onclick="location.href='03-SOEP-MFM-ACFP模块.html'">
+      <div class="card-icon" style="background:#e6f7ee;">🏗️</div>
+      <h3>03 SOEP-MFM / ACFP 金字塔</h3>
+      <p>从"特征金字塔传播退化"问题出发，详解SPDConv无损下采样、MFM自适应加权融合、CSP-OmniKernel多尺度增强。</p>
+      <span class="tag tag-green">特征增强</span>
+      <span class="tag tag-orange">问题驱动</span>
+    </div>
+
+    <div class="card" onclick="location.href='04-AIFI-Pola模块.html'">
+      <div class="card-icon" style="background:#f0e6ff;">🧠</div>
+      <h3>04 AIFI-Pola 注意力</h3>
+      <p>从"密集场景特征同质化"问题出发，详解极性感知线性注意力(PolaAttention)的极性分离机制与自适应通道门控前馈网络。</p>
+      <span class="tag tag-purple">密集场景</span>
+      <span class="tag tag-orange">问题驱动</span>
+    </div>
+
+    <div class="card" onclick="location.href='05-DIMB模块.html'">
+      <div class="card-icon" style="background:#ffe8e8;">⚡</div>
+      <h3>05 DIMB 轻量化</h3>
+      <p>从"模型部署效率"问题出发，详解多分支深度卷积(MBDC)、动态卷积核权重(DKW)、通道分割混合器(CSM)的协同轻量化设计。</p>
+      <span class="tag tag-red">轻量化</span>
+      <span class="tag tag-blue">效率优先</span>
+    </div>
+
+    <div class="card" onclick="location.href='06-整体架构.html'" style="grid-column: span 1;">
+      <div class="card-icon" style="background:linear-gradient(135deg,#4a6cf7,#7c3aed); color:white;">🌟</div>
+      <h3>06 完整 AD-DETR 架构</h3>
+      <p>综合所有模块的完整模型数据流图、模块间协同工作关系、实验数据总览与消融实验对比。</p>
+      <span class="tag tag-purple">全景总览</span>
+      <span class="tag tag-blue">答辩重点</span>
+    </div>
+  </div>
+
+  <div style="text-align:center; margin-top: 60px; padding: 30px; background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06);">
+    <h3 style="margin-bottom: 20px;">📖 阅读建议</h3>
+    <div style="display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; font-size: 0.95em; color: #555; line-height: 1.8;">
+      <div style="text-align:left;">
+        <strong style="color:#4a6cf7;">入门路径（时间有限）：</strong><br>
+        ① 01 Baseline原理解析<br>
+        ② 06 完整AD-DETR架构<br>
+        ③ 按需查看单个模块
+      </div>
+      <div style="text-align:left;">
+        <strong style="color:#7c3aed;">完整路径（推荐）：</strong><br>
+        ① 01 → ② 02 → ③ 03 → ④ 04 → ⑤ 05 → ⑥ 06<br>
+        按"问题→方案"逻辑链逐步深入
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

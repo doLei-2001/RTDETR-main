@@ -959,9 +959,53 @@ class TransformerEncoderLayer_DPB(nn.Module):
 
 ######################################## CrossFormer end ########################################
 
+######################################## PASE (Polarity-Aware Spatial Enhancement) Encoder start ########################################
+# 【论文映射】对应论文3.4节 PASE = 极性感知空间增强编码器
+# 用于替换RT-DETR原始AIFI模块，解决密集场景下目标区分问题
+# 包含:
+# 1. PolaLinearAttention: 极性感知线性注意力 (论文3.4.2节)
+#    - 极性分离策略: Q/K分解为正负极分量
+#    - 可学习幂次聚焦函数: 接近Softmax的尖锐注意力分布
+#    - O(N)线性复杂度
+# 2. SEFN (semnet.py): 空间增强前馈网络 = ACGF (论文3.4.3节)
+#    - 双输入设计: 注意力输出 + 编码器原始输入
+#    - 双向交互门控: 空间引导内容 + 语义引导空间增强
+# 3. TransformerEncoderLayer_Pola_SEFN: 完整PASE编码器层
+# 4. AIFI_SEFN: 标准注意力 + SEFN变体
+# 配置: rtdetr-Pola-SEFN.yaml
 ######################################## ICLR2025 PolaFormer start ########################################
 
 class PolaLinearAttention(nn.Module):
+    """PolaLinearAttention: 极性感知线性注意力机制
+
+    【论文映射】对应论文3.4.1-3.4.2节 PASE 中的 PolaAttention
+    PASE = Polarity-Aware Spatial Enhancement Encoder (极性感知空间增强编码器)
+
+    设计目标：替换原始AIFI中的Softmax自注意力机制，在O(N)线性复杂度下
+    实现高质量全局关系建模，解决传统线性注意力因ReLU截断导致负值信息丢失的问题。
+
+    核心创新（极性分离策略）：
+    1. 将Q/K沿正负极分解为正分量和负分量：
+       Q+ = max(Q,0), Q- = max(-Q,0)
+       K+ = max(K,0), K- = max(-K,0)
+    2. 构建同号交互(Same-signed Flow)和异号交互(Opposite-signed Flow)：
+       - 同号: Q+·K+ + Q-·K-
+       - 异号: Q+·K- + Q-·K+
+    3. 可学习幂次聚焦函数：
+       power = 1 + alpha * sigmoid(learnable_power)
+       对注意力分布进行自适应缩放，使其呈现接近Softmax的尖锐特性
+
+    计算流程：
+    1. Q/K分解 → ReLU(Q)和ReLU(-Q)保持极性分离
+    2. 同号/异号双路注意力计算（利用矩阵结合律实现线性复杂度）
+    3. 特征聚合: 同号流关注V的前半部分，异号流关注V的后半部分
+    4. 深度卷积(DWC)增强局部特征 + 门控机制(G)调制输出
+
+    复杂度: O(N) vs 标准注意力的O(N²)
+
+    输入: x ∈ [B, N, C]
+    输出: [B, N, C]
+    """
     def __init__(self, dim, hw, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., sr_ratio=1,
                  kernel_size=5, alpha=4):
         super().__init__()
@@ -1056,6 +1100,19 @@ class PolaLinearAttention(nn.Module):
         return x
 
 class ConvolutionalGLU(nn.Module):
+    """ConvolutionalGLU: 卷积门控线性单元
+
+    【论文映射】用于LDC模块中DynamicIncMixerBlock的MLP层
+    替代传统Transformer中的逐点FFN，引入深度卷积增强局部感知。
+
+    结构：1x1升维 → [分割为两路] → 一路DWConv3x3 + GELU → 与另一路逐元素乘
+    → 1x1降维 → 残差连接
+
+    门控机制：x = GELU(DWConv(x1)) * x2
+    其中x1经深度卷积提取局部特征，x2作为门控信号控制信息流动。
+
+    输入: x ∈ [B, C, H, W]    输出: [B, C, H, W]
+    """
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.) -> None:
         super().__init__()
         out_features = out_features or in_features
@@ -1240,6 +1297,15 @@ class TransformerEncoderLayer_ASSA(nn.Module):
 ######################################## WACV2024 SEMNet start ########################################
 
 class TransformerEncoderLayer_SEFN(nn.Module):
+    """Transformer编码器层: 标准自注意力 + SEFN(ACGF)空间增强FFN
+
+    【论文映射】对应论文3.4.3节 ACGF 的基础编码器层实现
+    使用标准多头自注意力 + SEFN(ACGF)前馈网络。
+
+    功能：编码器输入特征(spatial)直接传递给SEFN作为辅助输入(双输入设计)，
+    使FFN层能够利用原始特征保留的空间位置信息。
+    """
+
     def __init__(self, c1, cm=2048, num_heads=8, dropout=0.0, act=nn.GELU(), normalize_before=False):
         """Initialize the TransformerEncoderLayer with specified parameters."""
         super().__init__()
@@ -1297,7 +1363,17 @@ class TransformerEncoderLayer_SEFN(nn.Module):
         return self.forward_post(src, src_mask, src_key_padding_mask, pos)
 
 class AIFI_SEFN(TransformerEncoderLayer_SEFN):
-    """Defines the AIFI transformer layer."""
+    """AIFI_SEFN: 带空间增强前馈的AIFI编码器层
+
+    【论文映射】对应论文3.4节 PASE 编码器中使用空间增强FFN的变体
+    使用标准多头自注意力(而非PolaAttention) + SEFN(ACGF)空间增强前馈网络。
+
+    功能：在AIFI的基础上，将原始FFN替换为SEFN(ACGF)，
+    使前馈网络具备空间感知能力。编码器输入特征作为辅助输入传入SEFN，
+    保留原始空间位置判别性。
+
+    构造位置嵌入: 2D正弦-余弦位置编码
+    """
 
     def __init__(self, c1, cm=2048, num_heads=8, dropout=0, act=nn.GELU(), normalize_before=False):
         """Initialize the AIFI instance with specified parameters."""
@@ -1328,7 +1404,29 @@ class AIFI_SEFN(TransformerEncoderLayer_SEFN):
         return torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], 1)[None]
 
 class TransformerEncoderLayer_Pola_SEFN(nn.Module):
-    """Defines a single layer of the transformer encoder."""
+    """PASE编码器层: PolaLinearAttention + SEFN(ACGF)
+
+    【论文映射】对应论文3.4.1节 PASE 编码器的完整实现
+    PASE = Polarity-Aware Spatial Enhancement Encoder (极性感知空间增强编码器)
+
+    设计目标：替换RT-DETR原始AIFI模块，解决密集场景下全局感知不足
+    与空间定位模糊的问题。
+
+    两大子模块：
+    1.【PolaAttention】极性感知线性注意力 (transformer.py: PolaLinearAttention)
+       - 极性分离策略保留负值特征，恢复被丢弃的负值驱动交互信息
+       - 可学习幂次函数自适应缩放注意力分布
+       - O(N)线性复杂度
+
+    2.【ACGF/SEFN】自适应通道门控前馈网络 (semnet.py: SEFN)
+       - 双输入设计: 注意力输出(主) + 编码器原始输入(辅助)
+       - 空间分支从原始输入提取位置信息注入语义特征
+       - 恢复注意力聚合后被稀释的空间判别性
+
+    残差连接结构:
+        src → PolaAttention → +残差 → Norm → SEFN(src, src_) → +残差 → Norm → out
+        其中 src_ = 原始编码器输入(保留空间位置)
+    """
 
     def __init__(self, c1, cm=2048, num_heads=8, dropout=0.0, act=nn.GELU(), normalize_before=False):
         """Initialize the TransformerEncoderLayer with specified parameters."""

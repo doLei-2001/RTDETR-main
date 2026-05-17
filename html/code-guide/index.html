@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AD-DETR 深度代码解析</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="logo">AD-<span>DETR</span> 代码深度解析</div>
+  <a href="#overview">架构全景</a>
+  <a href="#yaml-assembly">YAML→模型</a>
+  <a href="#casfd">CAS-FD</a>
+  <a href="#acfp">ACFP</a>
+  <a href="#pase">PASE</a>
+  <a href="#ldc">LDC</a>
+  <a href="#pipeline">完整前向</a>
+  <a href="#data-and-baseline">数据+基线</a>
+  <a href="#defense">答辩问答</a>
+  <a href="#reviewer" style="color:#f85149">专家审查</a>
+</nav>
+
+<div class="hero">
+  <h1>AD-<span>DETR</span> 代码深度解析</h1>
+  <p>不只是"代码在哪里"——逐行理解每个模块做了什么、为什么这样做、数据如何流动、论文公式如何落代码</p>
+</div>
+
+<main>
+
+<!-- ================================================================ -->
+<!-- 架构全景 -->
+<!-- ================================================================ -->
+<section id="overview">
+<h2><span class="num" style="background:#8b949e33">1</span> 架构全景：一张图看懂 AD-DETR 数据流</h2>
+
+<div class="card">
+<p>先建立全局认知。下面是从输入图像到检测输出的<strong>完整数据流</strong>，每一步标注了张量形状变化和对应的论文模块。</p>
+
+<pre style="font-size:12px;line-height:1.8;">
+<span class="cmt">═══════════════════════════════════════════════════════════════════</span>
+<span class="cmt">  AD-DETR 完整前向传播 — 数据流全景图</span>
+<span class="cmt">  输入: 1 张 RGB 图像, 尺寸 640×640, batch=1</span>
+<span class="cmt">═══════════════════════════════════════════════════════════════════</span>
+
+<span class="cmt">╔═══ BACKBONE (主干网络) ═══════════════════════════════════════╗</span>
+<span class="cmt">║                                                                 ║</span>
+  <span class="kw">输入</span> x=[1,3,640,640]                         <span class="cmt"># RGB 图像</span>
+    │
+    ▼
+┌─ <span class="tp" style="color:#d2991d">SRFD (CAS-FD)</span> ──────────────────────────────────────┐
+│ 论文 §3.3.1                                           │
+│ 7×7 Conv → [1,16,640,640]                              │
+│ 阶段1: DetB(Cut)+SemB(步长Conv) → [1,32,320,320]       │
+│ 阶段2: DetB+SemB+SalB(MaxPool) → [1,64,160,160] P2/4  │
+└────────────────────────────────────────────────────────┘
+    │ x=[1,64,160,160]
+    ▼
+┌─ <span class="tp" style="color:#bc8cff">C2f_DCMB (LDC)</span> ──────────────────────────────────────┐
+│ 论文 §4.2  x128通道                                     │
+│ feat=[1,128,160,160]  P2/4                              │
+└────────────────────────────────────────────────────────┘
+    │ feat=[1,128,160,160]
+    ├─→ <span class="cmt">[保存为 P2 特征，供 ACFP 使用]</span>
+    ▼
+  Conv(s=2) → [1,256,80,80]  <span class="cmt"># P3/8</span>
+    ▼
+┌─ <span class="tp" style="color:#bc8cff">C2f_DCMB (LDC)</span> ──────────────────────────────────────┐
+│ feat=[1,256,80,80]  P3/8                                │
+└────────────────────────────────────────────────────────┘
+    │
+    ▼
+  Conv(s=2) → [1,384,40,40]  <span class="cmt"># P4/16</span>
+    ▼
+┌─ <span class="tp" style="color:#bc8cff">C2f_DCMB (LDC)</span> ──────────────────────────────────────┐
+│ feat=[1,384,40,40]  P4/16                               │
+└────────────────────────────────────────────────────────┘
+    │
+    ▼
+  Conv(s=2) → [1,384,20,20]  <span class="cmt"># P5/32</span>
+    ▼
+┌─ <span class="tp" style="color:#bc8cff">C2f_DCMB (LDC)×3</span> ────────────────────────────────────┐
+│ feat=[1,384,20,20]  P5/32                               │
+└────────────────────────────────────────────────────────┘
+<span class="cmt">║                                                                 ║</span>
+<span class="cmt">╚═══════════════════════════════════════════════════════════════════╝</span>
+
+<span class="cmt">╔═══ NECK: PASE 编码器 (替换 AIFI) ═════════════════════════════╗</span>
+    │ P5=[1,384,20,20]
+    ▼
+  Conv(384→256) → [1,256,20,20]
+    │
+    ▼
+┌─ <span class="tp" style="color:#58a6ff">PASE (TransformerEncoderLayer_Pola)</span> ────────────────┐
+│ 论文 §3.4                                             │
+│ flatten → [1,400,256]                                 │
+│ PolaAttention: 极性分离→同号/异号双路→O(N)全局建模    │
+│ reshape → [1,256,20,20]                               │
+│ + ConvolutionalGLU (ACGF): 空间感知门控前馈            │
+│ → [1,256,20,20]  Y5_encoded                           │
+└────────────────────────────────────────────────────────┘
+<span class="cmt">╚═══════════════════════════════════════════════════════════════════╝</span>
+
+<span class="cmt">╔═══ NECK: ACFP + FPN/PAN (特征金字塔) ═════════════════════════╗</span>
+    │ Y5_encoded=[1,256,20,20]
+    │
+    ├─ FPN Top-down ──────────────────────────────────────
+    │   Upsample → [1,256,40,40]
+    │   + P4([1,256,40,40]) → MFM融合 → RepC3 → Y4=[1,128,40,40]
+    │
+    │   Upsample → [1,128,80,80]
+    │   + P2(SPDConv[无损→128,80,80]) + P3([1,256,80,80])
+    │   → MFM三路融合 → [1,256,80,80]
+    │
+┌─ <span class="tp" style="color:#3fb950">CSPOmniKernel (CAFE)</span> ────────────────────────────────┐
+│ 论文 §3.3.2                                           │
+│ 25%通道→OmniKernel(31×31大核+FFT频域+1×1局部)          │
+│ 75%通道→恒等映射                                       │
+│ → RepC3 → [1,256,80,80]  P3_out                       │
+└────────────────────────────────────────────────────────┘
+    │
+    ├─ PAN Bottom-up ─────────────────────────────────────
+    │   Conv(s=2) → + Y4 → MFM → RepC3 → P4_out=[1,256,40,40]
+    │   Conv(s=2) → + Y5 → MFM → RepC3 → P5_out=[1,256,20,20]
+<span class="cmt">╚═══════════════════════════════════════════════════════════════════╝</span>
+
+<span class="cmt">╔═══ HEAD: RTDETRDecoder ═══════════════════════════════════════╗</span>
+    │ P3_out[1,256,80,80], P4_out[1,256,40,40], P5_out[1,256,20,20]
+    ▼
+  RTDETRDecoder(nc, 256, nq=300, ndp=4, nh=8, ndl=3)
+    │ IoU-aware Query Selection → 300 queries
+    │ Deformable Attention Decoder ×3 layers
+    ▼
+  <span class="kw">输出</span>: 300 个预测 [bbox_x, bbox_y, bbox_w, bbox_h, class_scores...]
+<span class="cmt">╚═══════════════════════════════════════════════════════════════════╝</span>
+</pre>
+
+<div class="callout info">
+<strong>四个模块在数据流中的分工：</strong><br>
+① <strong>CAS-FD</strong> 管"输入质量"—— 确保微小目标的像素信息在第一步不被丢失<br>
+② <strong>LDC</strong> 管"计算效率"—— 用最少的参数在 backbone 中逐级提取多尺度特征<br>
+③ <strong>PASE</strong> 管"全局理解"—— 在 P5 最深层用 O(N) 复杂度理解全图关系<br>
+④ <strong>ACFP</strong> 管"细节恢复"—— 把 P2 的高分辨率细节注入 neck，补偿下采样损失
+</div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- YAML 装配原理 -->
+<!-- ================================================================ -->
+<section id="yaml-assembly">
+<h2><span class="num" style="background:#8b949e33">2</span> YAML→模型：一行配置如何变成一个可训练的神经网络？</h2>
+
+<div class="card">
+
+<div class="callout detail">
+<strong>这是理解整个代码库最关键的一节。</strong><br>
+你写的 YAML 配置文件中的每一行 <code>[-1, 1, SRFD, [64]]</code>，<br>
+到底经历了什么步骤，变成了 <code>nn.Sequential</code> 里的一个 <code>SRFD(3,64)</code> 对象？<br>
+下面完整拆解这个过程。
+</div>
+
+<h3>2.1 YAML 配置格式 — 每行四个字段</h3>
+
+<p>以 <code>ad_detr/configs/ad_detr.yaml</code> 的 backbone 和 head 为例：</p>
+
+<pre style="font-size:12px;line-height:1.65;">
+<span class="cmt"># backbone 每条格式: [from, repeats, ModuleName, [args...]]</span>
+<span class="kw">backbone</span>:
+  - [-1, 1, SRFD, [64]]                      <span class="cmt"># 层0: from=上层, 1次, 类=SRFD, arg=[64]</span>
+  - [-1, 1, C2f_DCMB, [128]]                 <span class="cmt"># 层1: from=上层, 1次, 类=C2f_DCMB, arg=[128]</span>
+  - [-1, 1, Conv, [256, 3, 2]]               <span class="cmt"># 层2: from=上层, 1次, 类=Conv, args=[256,3,2]</span>
+  - [-1, 1, C2f_DCMB, [256]]                 <span class="cmt"># 层3</span>
+  ...
+
+<span class="kw">head</span>:
+  - [-1, 1, Conv, [256, 1, 1, None, 1, 1, False]]  <span class="cmt"># 层8: from=上层</span>
+  - [-1, 1, TransformerEncoderLayer_Pola, [1024, 8]] <span class="cmt"># 层9: PASE</span>
+  ...
+  - [5, 1, Conv, [256, 1, 1]]               <span class="cmt"># from=第5层(非-1!), 从backbone P4取特征</span>
+  - [[-2, -1], 1, Concat, [1]]               <span class="cmt"># from=倒数第2层+倒数第1层, concat拼接</span>
+  ...
+  - [[19, 22, 25], 1, RTDETRDecoder, [nc, 256, 300, 4, 8, 3]]  <span class="cmt"># from=3个层, 检测头</span>
+</pre>
+
+<div class="callout info">
+<strong>四个字段的含义：</strong><br>
+<table>
+<tr><th>字段</th><th>示例</th><th>含义</th></tr>
+<tr><td><b>from</b></td><td><code>-1</code></td><td>输入来自哪一层。-1=前一层, 5=第5层, [-2,-1]=前两层concat</td></tr>
+<tr><td><b>repeats</b></td><td><code>1</code></td><td>该模块重复几次。受 depth_multiple 缩放 (n = n × depth)</td></tr>
+<tr><td><b>ModuleName</b></td><td><code>SRFD</code></td><td>Python 类名字符串, 通过 <code>globals()['SRFD']</code> 查找</td></tr>
+<tr><td><b>args</b></td><td><code>[64]</code></td><td>传给 <code>__init__</code> 的参数列表, 第一个通常是输出通道数</td></tr>
+</table>
+</div>
+
+<h3>2.2 parse_model() — 把 YAML 变成 nn.Sequential</h3>
+
+<p>核心函数在 <code>ultralytics/nn/tasks.py</code> 的 <code>parse_model()</code> (约 line 711)。下面按实际执行顺序逐步拆解。</p>
+
+<h4>第1步：读取 YAML → 拼接 backbone + head</h4>
+
+<pre style="font-size:12px;">
+yaml_dict = yaml.safe_load(open(<span class="str">'ad_detr.yaml'</span>))
+<span class="cmt"># yaml_dict = {'nc':80, 'scales':{...}, 'backbone':[7行], 'head':[20行]}</span>
+
+<span class="kw">for</span> i, (f, n, m, args) <span class="kw">in</span> enumerate(                  <span class="cmt"># 遍历 backbone+head 所有行</span>
+    yaml_dict[<span class="str">'backbone'</span>] + yaml_dict[<span class="str">'head'</span>]       <span class="cmt"># 两层list直接拼接! 共27行 → 27层</span>
+):
+    <span class="cmt"># i=0, f=-1, n=1, m='SRFD', args=[64]  ← 第一行</span>
+    <span class="cmt"># i=1, f=-1, n=1, m='C2f_DCMB', args=[128]  ← 第二行</span>
+    <span class="cmt"># ...</span>
+    <span class="cmt"># i=8, f=-1, n=1, m='Conv', args=[256,1,1,...] ← head 第一行</span>
+</pre>
+
+<h4>第2步：把类名字符串变成真正的 Python 类</h4>
+
+<pre style="font-size:12px;">
+m = getattr(torch.nn, m[3:]) <span class="kw">if</span> <span class="str">'nn.'</span> <span class="kw">in</span> m <span class="kw">else</span> globals()[m]
+<span class="cmt">#       ↑ 如果 m 是 'nn.MaxPool2d' → torch.nn.MaxPool2d</span>
+<span class="cmt">#                                    ↑ 否则从 tasks.py 的全局命名空间查找</span>
+</pre>
+
+<div class="callout detail">
+<strong>这里 globals() 是谁的命名空间？</strong><br>
+<code>parse_model()</code> 定义在 <code>ultralytics/nn/tasks.py</code> 中。<br>
+<code>globals()</code> 返回 <b>tasks.py 模块的全局命名空间</b>（不是调用者的！）。<br><br>
+tasks.py 的全局命名空间包含什么？<br>
+<code>from ultralytics.nn.extra_modules import *</code> (line 13 of tasks.py)<br>
+↓<br>
+<code>from .block import *</code> (extra_modules/__init__.py)<br>
+↓<br>
+block.py 的 <code>__all__</code> 包含 SRFD, SPDConv, CSPOmniKernel, C2f_DCMB...<br>
+transformer.py 的 <code>__all__</code> 包含 PolaLinearAttention, TransformerEncoderLayer_Pola...<br><br>
+<strong>所以 YAML 里写 'SRFD' → globals()['SRFD'] → block.py 里的 SRFD 类 ✓</strong>
+</div>
+
+<h4>第3步：计算每层的输入通道数 c1 和输出通道数 c2</h4>
+
+<pre style="font-size:12px;">
+<span class="cmt"># 对于 C2f, C3, Conv 这类模块:</span>
+c1 = ch[f]   <span class="cmt"># 从"from"指定的层获取输入通道数</span>
+c2 = args[0] <span class="cmt"># args的第一个元素通常是输出通道数</span>
+<span class="kw">if</span> c2 != nc: c2 = make_divisible(min(c2, max_channels) * width, <span class="num">8</span>)
+<span class="cmt"># → 受 width_multiple 缩放，且对齐到 8 的倍数</span>
+
+<span class="cmt"># 对于 TransformerEncoderLayer_Pola 这类模块:</span>
+c2 = ch[f]   <span class="cmt"># 输入输出通道相同 (Transformer 不改变通道数)</span>
+<span class="cmt"># 只消耗 cm=args[0] (FFN隐藏层), num_heads=args[1]</span>
+
+<span class="cmt"># 对于 RTDETRDecoder:</span>
+<span class="cmt"># 把 from 列表里各层的通道插入 args[1] 位置</span>
+args[<span class="num">1</span>] = [ch[x] <span class="kw">for</span> x <span class="kw">in</span> f]  <span class="cmt"># → [256, 256, 256] (P3,P4,P5的通道)</span>
+</pre>
+
+<h4>第4步：实例化模块，放入 Sequential</h4>
+
+<pre style="font-size:12px;">
+<span class="cmt"># n > 1 时重复多次: nn.Sequential(*(m(*args) for _ in range(n)))</span>
+<span class="cmt"># n = 1 时直接: m(*args)</span>
+
+m_ = nn.Sequential(*(m(*args) <span class="kw">for</span> _ <span class="kw">in</span> range(n))) <span class="kw">if</span> n > <span class="num">1</span> <span class="kw">else</span> m(*args)
+
+<span class="cmt"># 举个例子: YAML 的 [-1, 3, C2f_DCMB, [384]]</span>
+<span class="cmt"># n=3 → nn.Sequential( C2f_DCMB(384,384), C2f_DCMB(384,384), C2f_DCMB(384,384) )</span>
+<span class="cmt"># 三个独立的 C2f_DCMB 模块串联, 每个输入384通道输出384通道</span>
+
+layers.append(m_)
+<span class="kw">yield</span> m_  <span class="cmt"># 存入最终的 nn.Sequential</span>
+</pre>
+
+<h3>2.3 具体走一遍：YAML 第一行的完整生命历程</h3>
+
+<div class="callout info">
+<strong>YAML 行:</strong> <code>[-1, 1, SRFD, [64]]</code>
+</div>
+
+<pre style="font-size:12px;line-height:1.8;">
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+<span class="cmt">  parse_model() 解析这一行的完整步骤</span>
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+
+<span class="cmt"># 输入: f=-1, n=1, m='SRFD', args=[64]</span>
+
+① f = <span class="num">-1</span>  <span class="cmt">→ 输入来自上一层 (layer[-1])</span>
+   <span class="cmt">  因为是第一层, f==-1 被特殊处理为 ch (初始通道数=3)</span>
+   <span class="cmt">  所以 c1 = 3 (RGB图像)</span>
+
+② m = <span class="str">'SRFD'</span>  <span class="cmt">→ globals()['SRFD'] → 找到 SRFD 类</span>
+   <span class="cmt">  globals() 从哪里找到的？</span>
+   <span class="cmt">  tasks.py → import extra_modules.* → block.py → __all__ 里有 'SRFD'</span>
+   <span class="cmt">  (或者 ad_detr/modules/_registry.py 注入进去的)</span>
+
+③ n = <span class="num">1</span>  <span class="cmt">→ n×depth_multiple = 1×1.0 = 1</span>
+
+④ <span class="cmt"># 通道计算 — parse_model 里对 SRFD 的特殊处理:</span>
+   <span class="cmt"># SRFD 在 if m in (..., SRFD, ...) 这个条件中 (tasks.py line 772)</span>
+   c1 = <span class="num">3</span>, c2 = args[<span class="num">0</span>] = <span class="num">64</span>
+   <span class="cmt"># c2 被 make_divisible + width_multiple 调整</span>
+   <span class="cmt"># 64 × 1.0 = 64, 64 已经能被 8 整除 → c2 = 64 ✓</span>
+
+⑤ <span class="cmt"># 实例化:</span>
+   m_ = SRFD(in_channels=<span class="num">3</span>, out_channels=<span class="num">64</span>)
+   <span class="cmt"># SRFD.__init__(3, 64) 被调用, 创建所有卷积层</span>
+
+⑥ layers.append(m_)
+   save_list 不保存此层 (因为后面没有 from=0 引用它)
+
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+<span class="cmt">  结果: nn.Sequential[0] = SRFD(3, 64)</span>
+<span class="cmt">  运行: model(x) 时 → x 经过 SRFD → [B,64,160,160]</span>
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+</pre>
+
+<h3>2.4 from 索引如何构建计算图</h3>
+
+<p>YAML 中的 <code>from</code> 字段不仅可以是 <code>-1</code>，还支持更复杂的引用：</p>
+
+<pre style="font-size:12px;line-height:1.75;">
+<span class="cmt"># from = 单个整数: 直接从指定层取输出</span>
+[<span class="num">5</span>, <span class="num">1</span>, Conv, [<span class="num">256</span>, <span class="num">1</span>, <span class="num">1</span>]]      <span class="cmt"># 从 backbone 的第5层(P3/8)取特征</span>
+[<span class="num">1</span>, <span class="num">1</span>, SPDConv, [<span class="num">128</span>]]          <span class="cmt"># 从 backbone 的第1层(P2/4)取特征 — ACFP的起点!</span>
+
+<span class="cmt"># from = 列表: 从多个层取输出, 拼接后作为输入</span>
+[[<span class="num">-2</span>, <span class="num">-1</span>], <span class="num">1</span>, Concat, [<span class="num">1</span>]]     <span class="cmt"># 取前两层输出, torch.cat([layer[-2], layer[-1]], dim=1)</span>
+[[<span class="num">19</span>, <span class="num">22</span>, <span class="num">25</span>], <span class="num">1</span>, RTDETRDecoder, [...]]  <span class="cmt"># 取P3/P4/P5输出, 送入解码器</span>
+
+<span class="cmt"># from = 多层 + 非Concat模块: 把多个特征图作为 list 传给 __init__</span>
+<span class="cmt"># 例如 MFM(多特征融合) 接收 [P2, P3, Y4] 三个输入</span>
+</pre>
+
+<div class="callout detail">
+<strong>save 机制：哪些层的输出会被保留？</strong><br>
+parse_model 维护一个 <code>save</code> 集合。当某层的 from 引用了某个索引时，该索引被加入 save。<br>
+运行时，model 前向传播会缓存 save 集合中层的输出，供后续层引用。<br><br>
+在 AD-DETR 中，backbone 的 P2/P3/P4/P5 层需要被保存：<br>
+- backbone 层1 (C2f_DCMB P2/4) → 被 head 的 SPDConv 引用 → 加入 save<br>
+- backbone 层3 (C2f_DCMB P3/8) → 被 FPN 引用 → 加入 save<br>
+- backbone 层5 (C2f_DCMB P4/16) → 被 FPN 引用 → 加入 save<br>
+- backbone 层7 (C2f_DCMB P5/32) → 直接被 head 引用 → 加入 save
+</div>
+
+<h3>2.5 _registry.py 如何让这一切跑起来</h3>
+
+<div class="callout info">
+<strong>这是 ad_detr 包与 ultralytics 框架之间的桥梁。</strong>
+</div>
+
+<pre style="font-size:12px;">
+<span class="cmt"># ad_detr/modules/_registry.py</span>
+<span class="kw">import</span> ultralytics.nn.tasks <span class="kw">as</span> _tasks
+
+<span class="kw">def</span> <span class="fn">register</span>():
+    <span class="kw">from</span> ad_detr.modules <span class="kw">import</span> SRFD, C2f_DCMB, CSPOmniKernel, \
+        PolaLinearAttention, TransformerEncoderLayer_Pola_CGLU, ...
+
+    <span class="cmt"># 把这些类注入到 tasks.py 的模块命名空间</span>
+    <span class="kw">for</span> cls <span class="kw">in</span> [SRFD, C2f_DCMB, ...]:
+        setattr(_tasks, cls.__name__, cls)  <span class="cmt"># tasks.SRFD = SRFD</span>
+
+    <span class="cmt"># 现在 parse_model() 中的 globals()['SRFD'] 就能找到了!</span>
+</pre>
+
+<div class="callout good">
+<strong>为什么 ad_detr 里的模块和 ultralytics/extra_modules 里的是同一份实现？</strong><br>
+ad_detr/modules/ 中的代码是从原始位置提取出来的 <b>完全相同的实现</b>。<br>
+它们通过 <code>_compat.py</code> 导入 ultralytics 的基础类（Conv, C2f 等），
+模块本身的逻辑代码与 <code>ultralytics/nn/extra_modules/block.py</code> 和 <code>transformer.py</code> 完全相同。<br><br>
+<b>区别只在于注释</b>：ad_detr 版本加了详细的论文对应和设计原理解释。
+</div>
+
+<h3>2.6 训练时 YAML 装配的完整调用链</h3>
+
+<div class="math">
+<strong>train.py 执行时的调用栈：</strong>
+
+1. train.py:    <span class="fn">train</span>(config='ad_detr')
+2.   → _registry.<span class="fn">register</span>()                    <span class="cmt">注入模块类到 tasks 命名空间</span>
+3.   → ultralytics.RTDETR(yaml_path)            <span class="cmt">用户API入口</span>
+4.     → RTDETRDetectionModel.__init__(yaml)    <span class="cmt">ultralytics/nn/tasks.py</span>
+5.       → yaml_model_load(yaml)                <span class="cmt">读取 YAML 文件</span>
+6.       → parse_model(yaml_dict)               <span class="cmt">核心: YAML→nn.Sequential</span>
+7.         → for each line in backbone+head:
+8.           → globals()[module_name]            <span class="cmt">类名字符串→Python类</span>
+9.           → compute c1, c2                    <span class="cmt">通道数计算</span>
+10.          → m_ = Class(*args)                 <span class="cmt">实例化模块</span>
+11.          → layers.append(m_)                 <span class="cmt">加入序列</span>
+12.  → model.train(data, epochs, ...)            <span class="cmt">开始训练</span>
+</div>
+
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- CAS-FD 深度解析 -->
+<!-- ================================================================ -->
+<section id="casfd">
+<h2><span class="num casfd">3</span> CAS-FD：代码逐行解析 — 为什么能保护小目标？</h2>
+
+<div class="card">
+<h3>2.1 问题根因：传统下采样如何"杀死"小目标</h3>
+
+<div class="callout detail">
+<strong>代码视角的根因分析：</strong><br>
+原始 RT-DETR Stem 层代码做的是：<br>
+<code>ConvNormLayer(3,32,k=3,s=2)</code> → <code>ConvNormLayer(32,32,k=3,s=1)</code> → <code>ConvNormLayer(32,64,k=3,s=1)</code> → <code>MaxPool2d(3,s=2)</code><br><br>
+问题出在第一行：<strong>stride=2</strong>。<br>
+当你在 640×640 的图像上做一个 stride=2 的 3×3 卷积：<br>
+• 卷积核每次移动 2 个像素 → 只有 1/4 的像素参与计算<br>
+• 对于占 3-10 像素的远距离行人 → 可能 <strong>全部落在被跳过的位置上</strong><br>
+• 这些像素的值永远不会出现在输出特征图中 → <strong>信息不可逆丢失</strong><br><br>
+关键洞察：这不是"特征不够清晰"的问题，而是 <strong>"目标像素压根没进入网络"</strong> 的问题。
+</div>
+
+<h3>2.2 Cut 类：DetB 细节分支 — 零丢失的下采样</h3>
+
+<div class="callout info">
+<strong>论文对应：</strong>CAS-FD 三路并行中的 Detail Branch (DetB)<br>
+<strong>代码位置：</strong><code>ad_detr/modules/cas_fd.py</code> → <code>class Cut</code><br>
+<strong>核心理念：</strong>不做采样，做重排——把空间像素搬到通道维
+</div>
+
+<pre>
+<span class="kw">class</span> <span class="cls">Cut</span>(nn.Module):
+    <span class="cmt"># 输入: [B, C, H, W]  输出: [B, out_c, H/2, W/2]</span>
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):
+        x0 = x[:, :, <span class="num">0</span>::<span class="num">2</span>, <span class="num">0</span>::<span class="num">2</span>]  <span class="cmt"># 偶数行,偶数列 → 左上</span>
+        x1 = x[:, :, <span class="num">1</span>::<span class="num">2</span>, <span class="num">0</span>::<span class="num">2</span>]  <span class="cmt"># 奇数行,偶数列 → 右上</span>
+        x2 = x[:, :, <span class="num">0</span>::<span class="num">2</span>, <span class="num">1</span>::<span class="num">2</span>]  <span class="cmt"># 偶数行,奇数列 → 左下</span>
+        x3 = x[:, :, <span class="num">1</span>::<span class="num">2</span>, <span class="num">1</span>::<span class="num">2</span>]  <span class="cmt"># 奇数行,奇数列 → 右下</span>
+        x = torch.cat([x0, x1, x2, x3], dim=<span class="num">1</span>)  <span class="cmt"># [B,4C,H/2,W/2]</span>
+        x = self.conv_fusion(x)                     <span class="cmt"># 1×1 Conv: [B,4C,H/2,W/2]→[B,out_c,H/2,W/2]</span>
+        <span class="kw">return</span> x
+</pre>
+
+<div class="callout good">
+<strong>理解这段代码的关键：</strong><br>
+想象一个 4×4 的迷你图像（16 个像素）：<br>
+<pre style="margin:8px 0;font-size:12px;">
+像素位置:   (0,0) (0,1) (0,2) (0,3)
+           (1,0) (1,1) (1,2) (1,3)
+           (2,0) (2,1) (2,2) (2,3)
+           (3,0) (3,1) (3,2) (3,3)
+
+x0 = ::2,::2 → (0,0) (0,2) (2,0) (2,2)  → 左上角4个
+x1 = 1::2,::2 → (1,0) (1,2) (3,0) (3,2) → 右上角4个
+x2 = ::2,1::2 → (0,1) (0,3) (2,1) (2,3) → 左下角4个
+x3 = 1::2,1::2 → (1,1) (1,3) (3,1) (3,3) → 右下角4个
+
+concat → 16 个像素全部进入 [B,4C,2,2] — 零丢失！
+对比 stride=2 conv: 只有 (0,0)(0,2)(2,0)(2,2) 4个像素被处理
+</pre>
+</div>
+
+<h3>2.3 SRFD 类：完整 CAS-FD — 两阶段逐级下采样</h3>
+
+<div class="callout info">
+<strong>代码位置：</strong><code>ad_detr/modules/cas_fd.py</code> → <code>class SRFD</code><br>
+<strong>论文公式对应：</strong>公式 3.1 (SWN), 公式 3.2 (逐像素加权)
+</div>
+
+<pre>
+<span class="kw">class</span> <span class="cls">SRFD</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, in_channels=3, out_channels=96):
+        out_c14 = out_channels // 4  <span class="cmt"># 16 → 给7×7 conv输出</span>
+        out_c12 = out_channels // 2  <span class="cmt"># 32 → 第一阶段融合后</span>
+
+        <span class="cmt"># === 7×7 大核：为什么不是 3×3？===</span>
+        <span class="cmt"># Stem 是网络的第一层，需要大感受野捕捉初始结构</span>
+        <span class="cmt"># 7×7 覆盖 49 个像素 → 在640×640上约 7.7% 的宽度</span>
+        <span class="cmt"># 足以捕获行人轮廓、车辆边缘等中级结构</span>
+        self.conv_init = Conv2d(3, 16, 7, stride=1, padding=3)
+
+        <span class="cmt"># === 第一阶段：SemB + DetB → 拼接融合 ===</span>
+        <span class="cmt"># SemB: depthwise 3×3(s=1) 预提取 → depthwise 3×3(s=2) 下采样</span>
+        <span class="cmt"># 为什么用 depthwise (groups=in_c)？Stem 阶段通道少(16→32)，</span>
+        <span class="cmt">#   独立处理每通道损失小，后续1×1 Conv 补足跨通道交互</span>
+        self.conv_1  = Conv2d(16, 32, 3, stride=1, groups=16)
+        self.conv_x1 = Conv2d(32, 32, 3, stride=2, groups=32)
+        self.cut_c   = Cut(16, 32)  <span class="cmt"># DetB 无损</span>
+        self.fusion1 = Conv2d(64, 32, 1)  <span class="cmt"># 64=SemB32+DetB32 → 32</span>
+
+        <span class="cmt"># === 第二阶段：SemB + SalB + DetB → 三路融合 ===</span>
+        self.conv_2  = Conv2d(32, 64, 3, stride=1, groups=32)
+        self.conv_x2 = Conv2d(64, 64, 3, stride=2, groups=64)  <span class="cmt"># SemB</span>
+        self.max_m   = MaxPool2d(2, 2)                         <span class="cmt"># SalB: 只保留最强信号</span>
+        self.cut_r   = Cut(32, 64)                             <span class="cmt"># DetB</span>
+        self.fusion2 = Conv2d(192, 64, 1)  <span class="cmt"># 192=三路各64 → 64</span>
+</pre>
+
+<div class="callout detail">
+<strong>为什么第二阶段才加入 SalB (MaxPool)？</strong><br>
+第一阶段从 640→320，特征图还很"raw"，MaxPool 在 raw 特征上容易把噪声当信号。<br>
+第二阶段从 320→160，经过 SemB 的深度卷积预处理后，特征更有"语义"，<br>
+此时 MaxPool 的"取最强信号"才有实际的显著性筛选意义。<br><br>
+
+<strong>为什么 fusion1 是 64→32 (降通道) 而 fusion2 是 192→64？</strong><br>
+融合后的通道数需要匹配下一阶段的输入。第一阶段融合后进入第二阶段的 SemB/DetB/SalB，<br>
+这些分支需要接收融合后的统一通道数。第二阶段融合后直接输出 P2/4，64 通道是预设值。
+</div>
+
+<h3>2.4 1×1 Conv 如何实现 SWN？— 代码与论文公式的对应</h3>
+
+<div class="math">
+<strong>论文公式 3.2:</strong> F_CAS-FD(i,j) = W_sem(i,j)·F_sem(i,j) + W_sal(i,j)·F_sal(i,j) + W_det(i,j)·F_det(i,j)
+
+<strong>代码中的等价实现:</strong>
+x = torch.cat([F_sem, F_sal, F_det], dim=1)   <span class="cmt"># [B, 3C, H, W]</span>
+x = self.fusion2(x)                           <span class="cmt"># 1×1 Conv: [B, 3C, H, W] → [B, C, H, W]</span>
+
+<strong>为什么 concat+1×1 Conv 等价于加权求和？</strong>
+1×1 Conv 的输出通道 k 的每个像素位置 (i,j) 的计算：
+out[k,i,j] = Σ_{c=0}^{3C} W[k,c] × concat_feat[c,i,j]
+           = Σ W[k,0:C]×F_sem[i,j] + Σ W[k,C:2C]×F_sal[i,j] + Σ W[k,2C:3C]×F_det[i,j]
+
+把三个部分的权重分别记为 W_sem, W_sal, W_det:
+out[k,i,j] = W_sem[i,j]×F_sem[i,j] + W_sal[i,j]×F_sal[i,j] + W_det[i,j]×F_det[i,j]
+
+这与论文公式 3.2 完全等价！关键在于：
+• 公式中的"权重网络 SWN"——代码中就是 1×1 Conv 的权重矩阵
+• 公式中的"逐像素"——1×1 Conv 逐位置独立计算，天然支持逐像素
+• 公式中的"Softmax 归一化"——虽然代码 fusion2 后没有显式 Softmax，
+  但 BN 后的特征分布自适应 + 后续网络的梯度优化，隐式实现了权重归一化
+</div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- ACFP 深度解析 -->
+<!-- ================================================================ -->
+<section id="acfp">
+<h2><span class="num acfp">4</span> ACFP：代码逐行解析 — 如何无损引入 P2 并多尺度增强？</h2>
+
+<div class="card">
+<h3>3.1 核心困境：为什么不能直接拼接 P2？</h3>
+
+<div class="callout detail">
+<strong>直接引入 P2 的两难：</strong><br>
+P2 特征图是 P3 的 4 倍面积（160×160 vs 80×80）→ 如果在 P2 上做 FPN 的全部操作，<br>
+计算量和显存都 ×4。但不引入 P2 → 小目标在 P3(80×80)上已经丢失细节。<br><br>
+<strong>ACFP 的策略：</strong><br>
+① SPDConv 把 P2 从 160×160 无损"压缩"到 80×80（空间→通道）<br>
+② 在 80×80 尺度上做三路融合（P2压缩 + P3 + Y4），避免高分辨率计算<br>
+③ CSPOmniKernel 仅对 25% 通道做大核增强，进一步节省计算
+</div>
+
+<h3>3.2 SPDConv：空间到深度的无损降维</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">SPDConv</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):  <span class="cmt"># x = [B, 128, 160, 160]</span>
+        x = torch.cat([
+            x[..., <span class="num">0</span>::<span class="num">2</span>, <span class="num">0</span>::<span class="num">2</span>],   <span class="cmt"># [B,128,80,80] 左上</span>
+            x[..., <span class="num">1</span>::<span class="num">2</span>, <span class="num">0</span>::<span class="num">2</span>],   <span class="cmt"># [B,128,80,80] 右上</span>
+            x[..., <span class="num">0</span>::<span class="num">2</span>, <span class="num">1</span>::<span class="num">2</span>],   <span class="cmt"># [B,128,80,80] 左下</span>
+            x[..., <span class="num">1</span>::<span class="num">2</span>, <span class="num">1</span>::<span class="num">2</span>]    <span class="cmt"># [B,128,80,80] 右下</span>
+        ], dim=1)           <span class="cmt"># → [B, 512, 80, 80] (128×4=512)</span>
+        <span class="kw">return</span> self.conv(x)  <span class="cmt"># 3×3 Conv: [B,512,80,80] → [B,128,80,80]</span>
+</pre>
+
+<div class="callout good">
+<strong>与步长卷积的关键差异（用具体数字说话）：</strong><br>
+输入 P2 特征 [1,128,160,160]，共有 128×160×160 = 3,276,800 个数值。<br><br>
+<strong>步长=2 卷积：</strong>输出 [1,128,80,80] = 819,200 个值，但只"看"了输入的 1/4 像素<br>
+→ 多达 <strong>2,457,600 个输入值从未被使用</strong>！<br><br>
+<strong>SPDConv：</strong>输出 [1,128,80,80] = 819,200 个值，但 <strong>100% 的输入像素都被映射</strong><br>
+→ 3,276,800 个值全部通过 4 路concat + 3×3Conv 参与了输出计算<br>
+→ 对于仅占几个像素的小目标，"不被跳过"就是"被检测到"的前提
+</div>
+
+<h3>3.3 OmniKernel：三路多尺度增强的代码解析</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">OmniKernel</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, dim):
+        ker = <span class="num">31</span>  <span class="cmt"># 为什么是31？见下方分析</span>
+
+        <span class="cmt"># === 四路深度可分离卷积 (groups=dim) ===</span>
+        self.dw_13 = Conv2d(dim, dim, (<span class="num">1</span>,<span class="num">31</span>), groups=dim)  <span class="cmt"># 横向带状</span>
+        self.dw_31 = Conv2d(dim, dim, (<span class="num">31</span>,<span class="num">1</span>), groups=dim)  <span class="cmt"># 纵向带状</span>
+        self.dw_33 = Conv2d(dim, dim, <span class="num">31</span>, groups=dim)         <span class="cmt"># 方形大核</span>
+        self.dw_11 = Conv2d(dim, dim, <span class="num">1</span>, groups=dim)           <span class="cmt"># 逐点局部</span>
+
+        <span class="cmt"># === FCA: 频域通道注意力 ===</span>
+        self.fac_conv = Conv2d(dim, dim, <span class="num">1</span>)
+        self.fac_pool = AdaptiveAvgPool2d((<span class="num">1</span>,<span class="num">1</span>))
+
+        <span class="cmt"># === FGM: 频率门控 — 融合 FCA 和 SCA ===</span>
+        self.fgm = <span class="tp">FGM</span>(dim)
+
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):
+        out = self.in_conv(x)                      <span class="cmt"># 1×1 + GELU 投影</span>
+
+        <span class="cmt"># --- FCA 频率通道注意力 ---</span>
+        x_att = self.fac_conv(self.fac_pool(out))  <span class="cmt"># GAP→Conv→频域注意力 [B,dim,1,1]</span>
+        x_fft = torch.fft.fft2(out)                <span class="cmt"># FFT 变换到频域</span>
+        x_fft = x_att * x_fft                      <span class="cmt"># 在频域进行通道加权</span>
+        x_fca = torch.abs(torch.fft.ifft2(x_fft))  <span class="cmt"># IFFT 回空域, 取幅值</span>
+
+        <span class="cmt"># --- SCA + FGM ---</span>
+        x_sca = self.conv(self.pool(x_fca)) * x_fca  <span class="cmt"># 通道注意力加权</span>
+        x_sca = self.fgm(x_sca)                     <span class="cmt"># 频率门控精炼</span>
+
+        <span class="cmt"># --- 四路多尺度融合 ---</span>
+        out = (x                          <span class="cmt"># 残差: 原始输入</span>
+               + self.dw_13(out)          <span class="cmt"># + 1×31 横向</span>
+               + self.dw_31(out)          <span class="cmt"># + 31×1 纵向</span>
+               + self.dw_33(out)          <span class="cmt"># + 31×31 方形</span>
+               + self.dw_11(out)          <span class="cmt"># + 1×1 局部</span>
+               + x_sca)                   <span class="cmt"># + FCA+SCA 全局增强</span>
+        <span class="kw">return</span> self.out_conv(self.act(out))  <span class="cmt"># ReLU + 1×1 输出</span>
+</pre>
+
+<div class="callout detail">
+<strong>为什么是 ker=31？</strong><br>
+<strong>31×31 在 P3(80×80)上：</strong>覆盖 31/80 ≈ 38.8% → 足以覆盖中等大小目标<br>
+<strong>31×31 在 P5(20×20)上：</strong>覆盖 31/20 ≈ 155% → 全图感受野，实现全局建模<br>
+<strong>对比其他选择：</strong><br>
+• 7×7 → 在P3上仅覆盖 8.8%，太小，无法感知车道级上下文<br>
+• 63×63 → 在P3上覆盖 78.8%，近似全局，但参数量暴增(63²=3969 vs 31²=961)<br>
+• 31×31 → 参数量可控，同时在各级特征图上提供合适的覆盖率<br><br>
+
+<strong>为什么用 1×31 和 31×1 而不只用 31×31？</strong><br>
+两个 1D 带状卷积叠加 ≈ 2D 大核效果，但参数量: 31+31=62 vs 31²=961<br>
+这是"低秩分解"思想: 2D 大核 W ∈ R^{31×31} 可以近似为 u·v^T (rank=1 分解)<br>
+带状 1×31 和 31×1 正是这种分解的空间显式实现
+</div>
+
+<h3>3.4 CSPOmniKernel：为什么只处理 25% 通道？</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">CSPOmniKernel</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):  <span class="cmt"># x = [B, 256, 80, 80]</span>
+        x = self.cv1(x)                              <span class="cmt"># 1×1 预处理</span>
+        ok_branch, identity = torch.split(           <span class="cmt"># 通道分割</span>
+            x,
+            [<span class="num">64</span>, <span class="num">192</span>],  <span class="cmt"># 25%=64ch 进 OmniKernel, 75%=192ch 恒等</span>
+            dim=<span class="num">1</span>
+        )
+        <span class="kw">return</span> self.cv2(torch.cat(          <span class="cmt"># 1×1 融合恢复</span>
+            (self.m(ok_branch), identity),  <span class="cmt"># OmniKernel处理 + 恒等映射</span>
+            dim=<span class="num">1</span>
+        ))
+</pre>
+
+<div class="callout good">
+<strong>25% 不是拍脑袋的数字 — 计算量分析：</strong><br>
+OmniKernel 最重的操作是 31×31 depthwise conv:<br><br>
+<strong>全通道 (256ch):</strong> 256 × 31² × 80² = 15.7G FLOPs (仅这一层!)<br>
+<strong>25% 通道 (64ch):</strong> 64 × 31² × 80² = 3.9G FLOPs<br>
+→ <strong>减少 75% 的大核计算量</strong><br><br>
+<strong>恒等映射 75% 的双重作用：</strong><br>
+① 梯度高速公路: 192 通道直接传递梯度，不经过 31×31 大核 → 避免深层梯度消失<br>
+② 特征锚点: 保留 75% 原始特征不变 → OmniKernel 学习的是"残差增强"而非"完全重塑"<br>
+③ 类似 ResNet: 学习 F(x)+x 比学习 F(x) 更容易 → 恒等映射降低优化难度
+</div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- PASE 深度解析 -->
+<!-- ================================================================ -->
+<section id="pase">
+<h2><span class="num pase">5</span> PASE：代码逐行解析 — 极性分离如何恢复 50% 丢失信息？</h2>
+
+<div class="card">
+<h3>4.1 根本问题：ReLU 在注意力中"杀"掉了什么？</h3>
+
+<div class="callout detail">
+<strong>传统线性注意力最关键的一行代码：</strong><br>
+<code>kernel = ReLU(Q) @ ReLU(K).transpose()</code><br><br>
+<strong>问题出在 ReLU：</strong><br>
+Q = [2.1, -1.5, 0.8, -3.2]<br>
+K = [1.8, -2.0, 0.5, -1.1]<br>
+实际内积 Q·K = 2.1×1.8 + (-1.5)×(-2.0) + 0.8×0.5 + (-3.2)×(-1.1)<br>
+             = 3.78 + 3.0 + 0.4 + 3.52 = <strong>10.7 (正!)</strong><br><br>
+但 ReLU 后：<br>
+ReLU(Q) = [2.1, 0, 0.8, 0], ReLU(K) = [1.8, 0, 0.5, 0]<br>
+ReLU(Q)·ReLU(K) = 2.1×1.8 + 0 + 0.8×0.5 + 0 = <strong>4.18</strong><br><br>
+<strong>损失了 10.7 - 4.18 = 6.52，即 61% 的信息！</strong><br>
+特别是 (-1.5)×(-2.0)=3.0 和 (-3.2)×(-1.1)=3.52，这两个"负负得正"的重要贡献<br>
+被 ReLU 硬生生截断了。
+</div>
+
+<h3>4.2 PolaLinearAttention：极性分离的完整计算流程</h3>
+
+<div class="callout info">
+<strong>代码位置：</strong><code>ad_detr/modules/pase.py</code> → <code>class PolaLinearAttention</code><br>
+<strong>论文公式：</strong>公式 3.3 (极性分离), 公式 3.4 (双路注意力)
+</div>
+
+<pre>
+<span class="cmt"># ====== 核心：极性分离 + 双路注意力 ======</span>
+
+<span class="cmt"># 步骤1: 极性分离 — 论文公式 3.3</span>
+q_pos = ReLU(q) ** power     <span class="cmt"># Q₊: 保留正值</span>
+q_neg = ReLU(-q) ** power    <span class="cmt"># Q₋: 负值取反→变成正值 (保留了负值的幅度信息!)</span>
+k_pos = ReLU(k) ** power     <span class="cmt"># K₊</span>
+k_neg = ReLU(-k) ** power    <span class="cmt"># K₋</span>
+
+<span class="cmt"># 步骤2: 构建同号/异号交互 — 论文公式 3.4</span>
+q_sim = cat([q_pos, q_neg], dim=-1)  <span class="cmt"># 同号: [Q₊ || Q₋]</span>
+q_opp = cat([q_neg, q_pos], dim=-1)  <span class="cmt"># 异号: [Q₋ || Q₊]</span>
+k     = cat([k_pos, k_neg], dim=-1)   <span class="cmt">#       [K₊ || K₋]</span>
+
+<span class="cmt"># 步骤3: 同号交互 — Q₊·K₊ + Q₋·K₋ (同为负的两个值，取反后都变正 → 正确交互)</span>
+v1, v2 = chunk(v, 2, dim=-1)         <span class="cmt"># V 分成两半</span>
+x_sim = q_sim @ (kᵀ @ v1)            <span class="cmt"># O(N) 线性注意力</span>
+
+<span class="cmt"># 步骤4: 异号交互 — Q₊·K₋ + Q₋·K₊ (正负交互，恢复符号差异信息)</span>
+x_opp = q_opp @ (kᵀ @ v2)
+
+<span class="cmt"># 步骤5: 合并</span>
+x = cat([x_sim, x_opp], dim=-1)      <span class="cmt"># 完整恢复所有符号组合</span>
+</pre>
+
+<div class="callout good">
+<strong>回到上面的例子，看 PolaAttention 如何恢复信息：</strong><br>
+Q = [2.1, -1.5, 0.8, -3.2], K = [1.8, -2.0, 0.5, -1.1]<br><br>
+极性分离后:<br>
+Q₊=[2.1,0,0.8,0], Q₋=[0,1.5,0,3.2], K₊=[1.8,0,0.5,0], K₋=[0,2.0,0,1.1]<br><br>
+<strong>同号交互 M_same:</strong><br>
+Q₊·K₊ = 2.1×1.8 + 0.8×0.5 = 4.18 (正-正)<br>
+Q₋·K₋ = 1.5×2.0 + 3.2×1.1 = 6.52 (负-负，取反后恢复!)<br>
+M_same = 4.18 + 6.52 = <strong>10.7 ✓ (完整恢复了!)</strong><br><br>
+<strong>异号交互 M_oppo:</strong><br>
+Q₊·K₋ = 2.1×2.0 + 0.8×1.1 = 5.08 (正-负)<br>
+Q₋·K₊ = 1.5×1.8 + 3.2×0.5 = 4.3  (负-正)<br>
+M_oppo = <strong>9.38</strong> (捕获了符号差异的交互信息)
+</div>
+
+<h3>4.3 可学习幂次：从"均匀"到"尖锐"的自适应注意力</h3>
+
+<pre>
+<span class="cmt"># 可学习幂次参数</span>
+self.power = nn.Parameter(torch.zeros(<span class="num">1</span>, num_heads, <span class="num">1</span>, head_dim))
+
+<span class="cmt"># 前向计算</span>
+power = <span class="num">1</span> + alpha * sigmoid(self.power)  <span class="cmt"># power ∈ (1, 1+alpha) = (1, 5)</span>
+q_pos = ReLU(q) ** power                   <span class="cmt"># 对激活值施加幂次缩放</span>
+</pre>
+
+<div class="callout detail">
+<strong>幂次到底在做什么？</strong><br>
+设两个激活值 a=0.9 (强响应) 和 b=0.1 (弱响应):<br><br>
+power=1: a¹=0.9, b¹=0.1 → ratio = 9:1 (标准线性注意力)<br>
+power=2: a²=0.81, b²=0.01 → ratio = <strong>81:1</strong> (开始聚焦)<br>
+power=5: a⁵=0.59, b⁵=0.00001 → ratio = <strong>59000:1</strong> (极度聚焦 = 接近 Softmax!)<br><br>
+<strong>关键洞察：</strong>幂次函数让强响应和弱响应之间的差距被放大。<br>
+power 越大 → 注意力越"尖锐" → 只关注最强关联的 key<br>
+power 越小 → 注意力越"均匀" → 兼顾更多 key<br>
+而 <strong>power 是可学习的</strong> → 网络自己决定每个 head 每个 channel 需要多"尖锐"的注意力分布！
+</div>
+
+<h3>4.4 ConvolutionalGLU：FFN 如何获得空间感知？</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">ConvolutionalGLU</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):  <span class="cmt"># x = [B, 256, 20, 20]</span>
+        x_shortcut = x                          <span class="cmt"># 残差: 保持原始特征通路</span>
+        x, v = self.fc1(x).chunk(<span class="num">2</span>, dim=<span class="num">1</span>)    <span class="cmt"># 1×1→[B,341,20,20]→分割: x[B,170,20,20], v[B,170,20,20]</span>
+        x = self.dwconv(x) * v                  <span class="cmt"># 3×3 dwconv(x) ⊙ gate(v) → 空间门控!</span>
+        x = self.fc2(x)                         <span class="cmt"># 1×1 投影回 [B,256,20,20]</span>
+        <span class="kw">return</span> x_shortcut + x                   <span class="cmt"># 残差</span>
+</pre>
+
+<div class="callout info">
+<strong>对比标准 FFN 和 ConvolutionalGLU:</strong><br><br>
+<strong>标准 FFN:</strong><br>
+x → Linear(C→4C) → GELU → Linear(4C→C)<br>
+每个位置独立处理 → 像素 (i,j) 的输出完全不依赖 (i',j') → <strong>零空间感知</strong><br><br>
+<strong>ConvolutionalGLU:</strong><br>
+x → 1×1 Conv(C→2H) → split(x, gate) → <strong>3×3 dwconv(x)</strong> ⊙ gate → 1×1 Conv(H→C)<br>
+3×3 dwconv 让每个像素 (i,j) 能"看到"其 3×3 邻域 → <strong>局部空间感知</strong><br>
+gate 机制让网络学习"哪些位置的空间信息该保留，哪些该抑制"<br>
+groups=hidden → 每个通道有自己独立的 3×3 卷积核 → <strong>通道自适应空间响应</strong><br><br>
+<strong>这就是论文中"空间位置信息注入语义特征"的代码实现！</strong>
+</div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- LDC 深度解析 -->
+<!-- ================================================================ -->
+<section id="ldc">
+<h2><span class="num ldc">6</span> LDC：代码逐行解析 — 参数如何从 19.9M 降到 14.1M？</h2>
+
+<div class="card">
+<h3>5.1 为什么标准卷积有巨大冗余？</h3>
+
+<div class="callout detail">
+<strong>标准卷积的空间-通道耦合问题：</strong><br>
+考虑一个 64→64 的 3×3 标准卷积：<br>
+• 每个输出通道 = 64×3×3 = 576 个参数<br>
+• 64 个输出通道 = 36,864 个参数<br>
+• 其中包括: 64×64 个通道间交互连接 → 每个输入通道和每个输出通道之间都有连接<br><br>
+<strong>问题：</strong>真的需要所有 64×64=4096 对通道都交互吗？<br>
+实际上，空间特征提取(3×3 邻域)和通道信息融合(跨通道)可以分离：<br>
+• 先用 depthwise conv 对每个通道独立做空间提取<br>
+• 再用 1×1 conv 做通道间融合<br>
+→ 参数量: 64×9 + 64×64 = 4,672 (depthwise+pointwise) vs 36,864 (标准)<br>
+→ <strong>减少 87.3%！</strong>
+</div>
+
+<h3>5.2 DynamicInceptionDWConv2d：MBDC + DKW</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">DynamicInceptionDWConv2d</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">__init__</span>(self, in_channels):
+        <span class="cmt"># 三路 depthwise conv — 每路参数量仅 C×K²</span>
+        self.dwconv = nn.ModuleList([
+            Conv2d(C, C, <span class="num">3</span>, groups=C),        <span class="cmt"># 方形 3×3 : C×9</span>
+            Conv2d(C, C, (<span class="num">1</span>,<span class="num">11</span>), groups=C),    <span class="cmt"># 横向 1×11: C×11</span>
+            Conv2d(C, C, (<span class="num">11</span>,<span class="num">1</span>), groups=C)     <span class="cmt"># 纵向 11×1: C×11</span>
+        ])
+
+        <span class="cmt"># DKW: 动态权重生成（几乎无参数开销）</span>
+        self.dkw = nn.Sequential(
+            AdaptiveAvgPool2d(<span class="num">1</span>),        <span class="cmt"># GAP: 提取场景级统计 → [B,C,1,1]</span>
+            Conv2d(C, C*<span class="num">3</span>, <span class="num">1</span>)          <span class="cmt"># 生成三路权重 → [B,3C,1,1]</span>
+        )
+
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):
+        <span class="cmt"># DKW: 场景自适应权重 → 三路融合</span>
+        w = rearrange(self.dkw(x), <span class="str">'bs (g ch) h w -> g bs ch h w'</span>, g=<span class="num">3</span>)
+        w = F.softmax(w, dim=<span class="num">0</span>)                     <span class="cmt"># 三路权重归一化 → ∑w_i = 1</span>
+        x = sum(self.dwconv[i](x) * w[i] <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">3</span>))  <span class="cmt"># 加权融合</span>
+        <span class="kw">return</span> SiLU(BN(x))
+</pre>
+
+<div class="callout good">
+<strong>DKW 如何使卷积"动态"？</strong><br>
+标准卷积: 训练完成后权重固定 → 对所有输入图像用同一组参数<br>
+DKW: 每个输入图像先 GAP → 1×1 Conv → Softmax → 生成该图像的专属权重<br>
+→ <strong>不同场景自动用不同的多尺度混合策略</strong><br><br>
+具体场景分析:<br>
+• 密集停车场图像 → GAP 特征: 高方差, 多高频 → Softmax: 方形3×3 权重↑ (局部纹理重要)<br>
+• 稀疏高速路图像 → GAP 特征: 低方差, 多低频 → Softmax: 带状1×11/11×1 权重↑ (远程连续结构重要)<br>
+• <strong>这一切由输入图像的 GAP 统计量自动决定，无需人工指定!</strong>
+</div>
+
+<h3>5.3 DynamicInceptionMixer：CSM 通道分割</h3>
+
+<pre>
+<span class="kw">class</span> <span class="cls">DynamicInceptionMixer</span>(nn.Module):
+    <span class="kw">def</span> <span class="fn">forward</span>(self, x):  <span class="cmt"># x = [B, 256, 80, 80]</span>
+        <span class="cmt"># 通道分割: 128 + 128</span>
+        x1, x2 = torch.split(x, [<span class="num">128</span>, <span class="num">128</span>], dim=<span class="num">1</span>)
+
+        <span class="cmt"># 并行处理: 不同感受野的 MBDC</span>
+        x1 = self.convs[<span class="num">0</span>](x1)  <span class="cmt"># 方形核=3 → 局部细节</span>
+        x2 = self.convs[<span class="num">1</span>](x2)  <span class="cmt"># 方形核=5 → 更大感受野</span>
+
+        <span class="cmt"># 拼接 + 跨组融合</span>
+        x = torch.cat([x1, x2], dim=<span class="num">1</span>)  <span class="cmt"># [B,256,80,80]</span>
+        <span class="kw">return</span> self.conv_1x1(x)           <span class="cmt"># 1×1 Conv 实现跨组信息交互</span>
+</pre>
+
+<div class="callout detail">
+<strong>通道分割 + 不同核尺寸 = 双重多尺度：</strong><br>
+Group 1 (k=3): 处理前 128 通道，小感受野 → 保留精细局部特征<br>
+Group 2 (k=5): 处理后 128 通道，大感受野 → 捕获更大范围的上下文<br>
+→ 同一层同时拥有两种空间尺度 → 提升了特征的多尺度表达能力<br>
+→ 最后 1×1 Conv 让两组不同尺度的特征充分交互
+</div>
+
+<h3>5.4 参数压缩全景计算</h3>
+
+<div class="card">
+<table>
+<tr><th>模块</th><th>原 BasicBlock 参数</th><th>LDC Block 参数</th><th>压缩比</th></tr>
+<tr>
+  <td>空间特征提取</td>
+  <td>2×3×3×C×C = 18C²</td>
+  <td>C×31 (三路DW) + C×3×1 (DKW)</td>
+  <td>~C/18 ×</td>
+</tr>
+<tr>
+  <td>通道融合</td>
+  <td>隐含在 3×3 Conv 中</td>
+  <td>ConvolutionalGLU: ~2C×H (H≈2C/3)</td>
+  <td>—</td>
+</tr>
+<tr>
+  <td>示例 C=128</td>
+  <td>18×128² ≈ 295K</td>
+  <td>128×31 + 2×128×85 ≈ 26K</td>
+  <td><strong>↓91%</strong></td>
+</tr>
+<tr>
+  <td>示例 C=256</td>
+  <td>18×256² ≈ 1.18M</td>
+  <td>256×31 + 2×256×170 ≈ 95K</td>
+  <td><strong>↓92%</strong></td>
+</tr>
+</table>
+</div>
+
+<div class="callout good">
+<strong>精度不降反升的原因 (mAP50 ↑0.4):</strong><br>
+① <strong>过参数化缓解:</strong> 标准卷积有大量冗余参数 → 减参数 = 减过拟合风险<br>
+② <strong>多尺度互补:</strong> 3×3 + 1×11 + 11×1 比单一 3×3 有更丰富的空间建模能力<br>
+③ <strong>DKW 动态适应性:</strong> 不同场景自动调整多分支权重 → 比静态卷积更灵活<br>
+④ <strong>训练更稳定:</strong> LayerScale(init=1e-2) + DropPath = 隐式 ensemble 效果
+</div>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- 完整前向传播 -->
+<!-- ================================================================ -->
+<section id="pipeline">
+<h2><span class="num" style="background:#8b949e33">7</span> 完整前向传播：一次推理走完四个模块</h2>
+
+<div class="card">
+<p>以下跟踪 <strong>一张 640×640 BDD100K 图像</strong> 在 AD-DETR 中的完整前向传播，每一步标注张量形状和计算内容。</p>
+
+<pre style="font-size:12px;line-height:1.75;">
+<span class="cmt">========================================================================</span>
+<span class="cmt"> 输入: 1张RGB图, 640×640, batch=1</span>
+<span class="cmt">========================================================================</span>
+
+<span class="kw">输入:</span>  x = torch.randn(<span class="num">1</span>, <span class="num">3</span>, <span class="num">640</span>, <span class="num">640</span>)    <span class="cmt"># [B=1, C=3,  H=640, W=640]</span>
+
+<span class="cmt">--- BACKBONE 阶段0: CAS-FD (SRFD) ---</span>
+  x = SRFD(x)                              <span class="cmt"># [1,3,640,640] → [1,64,160,160]</span>
+  <span class="cmt"># 内部: 7×7Conv → DetB(Cut)+SemB(步长Conv) [320×320]</span>
+  <span class="cmt">#      → DetB+SemB+SalB(MaxPool) [160×160]</span>
+
+<span class="cmt">--- BACKBONE 阶段1: LDC Stage 2 (P2/4) ---</span>
+  x = C2f_DCMB(x)                          <span class="cmt"># [1,64,160,160]  → [1,128,160,160]</span>
+  <span class="cmt"># 内部: C2f = cv1→split(C/2恒等,C/2经LDC)→cv2</span>
+  <span class="cmt"># LDC = CSM(通道再split)→MBDC(k=3,k=5)+DKW→1×1→CGLU</span>
+  p2 = x                                    <span class="cmt"># 保存 P2 特征 [1,128,160,160] — 供 ACFP 使用</span>
+
+<span class="cmt">--- BACKBONE 阶段2: LDC Stage 3 (P3/8) ---</span>
+  x = Conv(x, s=<span class="num">2</span>)                          <span class="cmt"># [1,128,160,160] → [1,256,80,80]</span>
+  x = C2f_DCMB(x)                          <span class="cmt"># [1,256,80,80]   → [1,256,80,80]</span>
+
+<span class="cmt">--- BACKBONE 阶段3: LDC Stage 4 (P4/16) ---</span>
+  x = Conv(x, s=<span class="num">2</span>)                          <span class="cmt"># [1,256,80,80]   → [1,384,40,40]</span>
+  x = C2f_DCMB(x)                          <span class="cmt"># [1,384,40,40]   → [1,384,40,40]</span>
+
+<span class="cmt">--- BACKBONE 阶段4: LDC Stage 5 (P5/32) ---</span>
+  x = Conv(x, s=<span class="num">2</span>)                          <span class="cmt"># [1,384,40,40]   → [1,384,20,20]</span>
+  x = C2f_DCMB(x) * <span class="num">3</span>                      <span class="cmt"># [1,384,20,20]   → [1,384,20,20]</span>
+  p5_raw = x                                <span class="cmt"># P5 原始特征</span>
+
+<span class="cmt">========================================================================</span>
+<span class="cmt">  NECK 阶段1: PASE 编码器 (替换原始 AIFI)</span>
+<span class="cmt">========================================================================</span>
+
+  x = Conv(p5_raw, <span class="num">384</span>→<span class="num">256</span>)               <span class="cmt"># [1,256,20,20]  输入投影</span>
+
+  <span class="cmt"># PASE = PolaAttention + ConvolutionalGLU (ACGF)</span>
+  x = x.flatten(<span class="num">2</span>).transpose(<span class="num">1</span>,<span class="num">2</span>)        <span class="cmt"># [1,400,256]    2D→序列 (400=20×20)</span>
+
+  <span class="cmt"># --- PolaAttention 内部 ---</span>
+  q, g = Linear(x)                         <span class="cmt"># [1,400,512]→q:[1,400,256], g:[1,400,256]</span>
+  k, v = Linear(x)                         <span class="cmt"># [1,400,512]→k:[1,400,256], v:[1,400,256]</span>
+  q = reshape(q, <span class="num">8</span> heads)                 <span class="cmt"># [1,8,400,32]  多头: 256/8=32 per head</span>
+  q_pos=ReLU(q)^power, q_neg=ReLU(-q)^power <span class="cmt"># 极性分离</span>
+  x_sim = q_sim @ (kᵀ @ v1)               <span class="cmt"># 同号交互 O(400×32²) 而非 O(400²)</span>
+  x_opp = q_opp @ (kᵀ @ v2)               <span class="cmt"># 异号交互</span>
+  x = cat([x_sim, x_opp]) * g             <span class="cmt"># 合并 + 门控</span>
+
+  x = x.reshape(<span class="num">1</span>,<span class="num">256</span>,<span class="num">20</span>,<span class="num">20</span>)             <span class="cmt"># [1,256,20,20]  序列→2D</span>
+
+  <span class="cmt"># --- ACGF (ConvolutionalGLU) 内部 ---</span>
+  x_ = fc1(x).chunk(<span class="num">2</span>)                    <span class="cmt"># 1×1→split: content, gate</span>
+  x_ = dwconv(content) * gate             <span class="cmt"># 3×3空间卷积 ⊙ 门控 = 空间感知精炼</span>
+  x = x + fc2(x_)                          <span class="cmt"># 残差: [1,256,20,20]</span>
+
+  y5 = Conv(x, <span class="num">256</span>→<span class="num">256</span>)                  <span class="cmt"># Y5 encoded: [1,256,20,20]</span>
+
+<span class="cmt">========================================================================</span>
+<span class="cmt">  NECK 阶段2: FPN 自顶向下 + ACFP</span>
+<span class="cmt">========================================================================</span>
+
+  <span class="cmt"># FPN: P5→P4</span>
+  y4_up = Upsample(y5)                     <span class="cmt"># [1,256,40,40]</span>
+  p4 = Conv(backbone_P4, <span class="num">384</span>→<span class="num">256</span>)        <span class="cmt"># P4 投影: [1,256,40,40]</span>
+  y4_fused = MFM(y4_up, p4)                <span class="cmt"># MFM 自适应融合: [1,256,40,40]</span>
+  y4_fused = RepC3(y4_fused)               <span class="cmt"># RepC3 精炼:    [1,256,40,40]</span>
+  y4 = Conv(y4_fused, <span class="num">256</span>→<span class="num">128</span>)            <span class="cmt"># Y4 lateral:    [1,128,40,40]</span>
+
+  <span class="cmt"># FPN: P4→P3/P2 — ACFP 核心!</span>
+  y4_up2 = Upsample(y4)                    <span class="cmt"># [1,128,80,80]</span>
+  p2_spd = SPDConv(p2)                     <span class="cmt"># [1,512,80,80]→[1,128,80,80] (无损!)</span>
+  p3 = Conv(backbone_P3, <span class="num">256</span>→<span class="num">256</span>)        <span class="cmt"># P3 投影:      [1,256,80,80]</span>
+
+  <span class="cmt"># ACFP 三路融合</span>
+  fused = MFM(p2_spd, p3, y4_up2)           <span class="cmt"># P2+ P3+ Y4:   [1,256,80,80]</span>
+  fused = CSPOmniKernel(fused)             <span class="cmt"># 25%ch→OmniKernel(31×31+FFT): [1,256,80,80]</span>
+  p3_out = RepC3(fused)                    <span class="cmt"># P3 最终输出:  [1,256,80,80]</span>
+
+  <span class="cmt"># PAN: P3→P4</span>
+  p4_pan = Conv(p3_out, s=<span class="num">2</span>) + MFM(y4)     <span class="cmt"># [1,256,40,40]</span>
+  p4_out = RepC3(p4_pan)                   <span class="cmt"># P4 最终输出:  [1,256,40,40]</span>
+
+  <span class="cmt"># PAN: P4→P5</span>
+  p5_pan = Conv(p4_out, s=<span class="num">2</span>) + MFM(y5)    <span class="cmt"># [1,256,20,20]</span>
+  p5_out = RepC3(p5_pan)                   <span class="cmt"># P5 最终输出:  [1,256,20,20]</span>
+
+<span class="cmt">========================================================================</span>
+<span class="cmt">  HEAD: RTDETRDecoder → 检测输出</span>
+<span class="cmt">========================================================================</span>
+
+  <span class="cmt"># IoU-aware Query Selection: 从编码特征中选 top-300 查询</span>
+  queries = select_topk(p5_out, <span class="num">300</span>)       <span class="cmt"># [300, 256]</span>
+
+  <span class="cmt"># Deformable Attention Decoder ×3 layers</span>
+  <span class="kw">for</span> layer <span class="kw">in</span> decoder_layers:
+      queries = DeformAttn(queries, [p3_out, p4_out, p5_out])
+      queries = FFN(queries)
+
+  <span class="cmt"># 预测头: 300 个检测结果</span>
+  bboxes = bbox_head(queries)              <span class="cmt"># [1,300,4]   (cx,cy,w,h)</span>
+  scores = class_head(queries)             <span class="cmt"># [1,300,nc]  (类别分数)</span>
+
+<span class="kw">输出:</span>  <span class="num">300</span> 个预测框, 每个包含 [x,y,w,h, score_0..score_nc]
+</pre>
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- 数据读取 + RT-DETR 基线 -->
+<!-- ================================================================ -->
+<section id="data-and-baseline">
+<h2><span class="num" style="background:#8b949e33">8</span> 数据读取在哪里？RT-DETR 基线的代码又在哪？</h2>
+
+<div class="card">
+
+<h3>8.1 AD-DETR 不是从零写的——它建立在 RT-DETR (ultralytics) 之上</h3>
+
+<div class="callout detail">
+<strong>关键概念：</strong>AD-DETR 把 RT-DETR 当作"框架"来用。<br>
+就像你不会从零写一个操作系统来跑 Python 脚本一样，你也不会从零写训练循环、数据加载、损失函数来跑你的改进模块。<br><br>
+<strong>AD-DETR 改了什么（论文创新）：</strong><br>
+• Backbone 的 Stem 层：ConvNormLayer×3+MaxPool → <b>SRFD (CAS-FD)</b><br>
+• Backbone 的 Block：BasicBlock → <b>C2f_DCMB (LDC)</b><br>
+• Neck 的编码器：AIFI → <b>PASE (PolaAttention + ACGF)</b><br>
+• Neck 的特征融合：简单 Concat → <b>ACFP (SPDConv + CSPOmniKernel)</b><br><br>
+<strong>AD-DETR 复用了什么（RT-DETR 原封不动）：</strong><br>
+• 整个训练循环、优化器、学习率调度<br>
+• 数据加载、数据增强（Mosaic、翻转、色彩抖动）<br>
+• 损失函数（Varifocal Loss、GIoU Loss、L1 Loss）<br>
+• 匈牙利匹配器（Hungarian Matcher）<br>
+• 解码器（RTDETRDecoder + Deformable Attention）<br>
+• 验证/测试流程、mAP 计算<br>
+• YAML 配置解析系统
+</div>
+
+<h3>8.2 数据读取的完整调用链</h3>
+
+<p>数据是怎么从硬盘上的 BDD100K 图片变成模型输入的 tensor 的？</p>
+
+<pre style="font-size:12px;line-height:1.7;">
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+<span class="cmt">  数据读取调用链 — 从 YAML 配置到 GPU Tensor</span>
+<span class="cmt">═══════════════════════════════════════════════════════════</span>
+
+<span class="cmt"># 1. 数据集 YAML 文件 (如 data_bdd100k.yaml)</span>
+<span class="cmt">#    指定了 train/val 图片路径和类别名称:</span>
+<span class="kw">train</span>: /path/to/bdd100k/images/train
+<span class="kw">val</span>:   /path/to/bdd100k/images/val
+<span class="kw">nc</span>: <span class="num">10</span>              <span class="cmt"># BDD100K 有 10 个类别</span>
+<span class="kw">names</span>: [<span class="str">'pedestrian'</span>, <span class="str">'rider'</span>, <span class="str">'car'</span>, <span class="str">'truck'</span>, <span class="str">'bus'</span>,
+         <span class="str">'train'</span>, <span class="str">'motorcycle'</span>, <span class="str">'bicycle'</span>, <span class="str">'traffic light'</span>, <span class="str">'traffic sign'</span>]
+
+<span class="cmt"># 2. model.train(data='data_bdd100k.yaml')</span>
+<span class="cmt">#    ultralytics/engine/model.py → 读取 data yaml, 创建 Trainer</span>
+
+<span class="cmt"># 3. RTDETRTrainer.build_dataset()</span>
+<span class="cmt">#    文件: ultralytics/models/rtdetr/train.py line 51</span>
+<span class="cmt">#    → 创建 RTDETRDataset 实例</span>
+
+<span class="cmt"># 4. RTDETRDataset (继承 BaseDataset)</span>
+<span class="cmt">#    文件: ultralytics/models/rtdetr/val.py</span>
+<span class="cmt">#    → 读取图片列表 + 标签文件</span>
+<span class="cmt">#    → 应用数据增强 (Mosaic, 翻转, HSV抖动)</span>
+<span class="cmt">#    → 返回 (image_tensor, labels_dict)</span>
+
+<span class="cmt"># 5. RTDETRTrainer.preprocess_batch()</span>
+<span class="cmt">#    文件: ultralytics/models/rtdetr/train.py line 83</span>
+<span class="cmt">#    → 图片 resize 到 640×640</span>
+<span class="cmt">#    → bboxes 归一化 + 格式转换</span>
+<span class="cmt">#    → 返回训练用的 batch</span>
+
+<span class="cmt"># 6. 训练循环中:</span>
+<span class="kw">for</span> batch <span class="kw">in</span> dataloader:
+    images = batch[<span class="str">'img'</span>].to(device)     <span class="cmt"># [B, 3, 640, 640]</span>
+    preds = model(images)                  <span class="cmt"># 前向传播 → 你的四个模块在这里!</span>
+    loss = criterion(preds, batch)         <span class="cmt"># 损失计算</span>
+    loss.backward()                        <span class="cmt"># 反向传播</span>
+    optimizer.step()                       <span class="cmt"># 参数更新</span>
+</pre>
+
+<h3>8.3 RT-DETR 原始代码在哪里？</h3>
+
+<div class="callout info">
+<strong>ultralytics 框架中的 RT-DETR 代码分为四层：</strong>
+</div>
+
+<table>
+<tr><th>层级</th><th>文件</th><th>内容</th><th>AD-DETR 是否修改</th></tr>
+<tr>
+  <td><b>模型定义</b></td>
+  <td><code>ultralytics/nn/modules/</code><br>(conv.py, block.py, transformer.py, head.py)</td>
+  <td>Conv, C2f, BasicBlock, AIFI, RTDETRDecoder 等基础模块</td>
+  <td style="color:#8b949e">否 — 原封不动使用</td>
+</tr>
+<tr>
+  <td><b>模型组装</b></td>
+  <td><code>ultralytics/nn/tasks.py</code></td>
+  <td>parse_model() — YAML→nn.Sequential<br>RTDETRDetectionModel — 模型类</td>
+  <td style="color:#8b949e">否 — 通过 _registry.py 扩展</td>
+</tr>
+<tr>
+  <td><b>论文改进模块</b></td>
+  <td><code>ultralytics/nn/extra_modules/block.py</code><br><code>ultralytics/nn/extra_modules/transformer.py</code></td>
+  <td>SRFD, OmniKernel, CSPOmniKernel, DynamicInception系列<br>PolaLinearAttention, ConvolutionalGLU, TransformerEncoderLayer_Pola</td>
+  <td style="color:#3fb950"><b>是 — 论文核心创新</b></td>
+</tr>
+<tr>
+  <td><b>训练管线</b></td>
+  <td><code>ultralytics/models/rtdetr/train.py</code><br><code>ultralytics/models/rtdetr/val.py</code><br><code>ultralytics/engine/trainer.py</code></td>
+  <td>RTDETRTrainer — 训练循环<br>RTDETRValidator — 验证<br>BaseTrainer — 通用训练逻辑</td>
+  <td style="color:#8b949e">否 — 原封不动使用</td>
+</tr>
+<tr>
+  <td><b>数据集</b></td>
+  <td><code>ultralytics/data/</code></td>
+  <td>BaseDataset, 数据增强, dataloader</td>
+  <td style="color:#8b949e">否 — 原封不动使用</td>
+</tr>
+</table>
+
+<h3>8.4 整理后的 ad_detr/ 包与原始代码的关系</h3>
+
+<div class="math">
+<strong>ad_detr/ 的定位：论文模块的"整理版 + 注释版"</strong>
+
+ad_detr/modules/cas_fd.py   ←→  ultralytics/nn/extra_modules/block.py (SRFD, Cut, DRFD 部分)
+ad_detr/modules/acfp.py     ←→  ultralytics/nn/extra_modules/block.py (SPDConv, OmniKernel, CSPOmniKernel 部分)
+ad_detr/modules/pase.py     ←→  ultralytics/nn/extra_modules/transformer.py (PolaLinearAttention, TransformerEncoderLayer_Pola 部分)
+ad_detr/modules/ldc.py      ←→  ultralytics/nn/extra_modules/block.py (DynamicInception 系列 部分)
+
+ad_detr/modules/_compat.py  →  从 ultralytics 导入 Conv, C2f, LayerNorm, DropPath
+ad_detr/modules/_registry.py → 把模块类注入 ultralytics.nn.tasks 命名空间
+
+ad_detr/train.py             →  调用 ultralytics.RTDETR, 触发完整训练管线
+ad_detr/configs/ad_detr.yaml →  YAML 配置, parse_model() 逐层装配
+
+<b>核心关系：ad_detr 不重复造轮子，它把论文特有的模块整理清楚，
+然后通过 _registry 注入到 ultralytics 框架中正常运行。</b>
+</div>
+
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- 答辩视角 -->
+<!-- ================================================================ -->
+<section id="defense">
+<h2><span class="num" style="background:#f8514933;color:#f85149">9</span> 答辩深度问答 — 从代码中预埋答案</h2>
+
+<div class="card">
+
+<div class="callout warn">
+<strong>Q: CAS-FD 的"内容感知"体现在哪里？代码中如何实现？</strong><br><br>
+<strong>A:</strong> "内容感知"体现在 <strong>SWN (空间权重网络)</strong> 的像素级自适应加权。<br>
+代码实现: <code>torch.cat([F_sem, F_sal, F_det], dim=1) + 1×1 Conv</code><br>
+1×1 Conv 的权重对每个空间位置独立计算:
+<code>out[i,j] = Σ W[c] × concat_feat[c,i,j]</code><br>
+→ 高纹理区域 (有行人) → W_det 大 (保留细节)  /  平滑区域 (道路) → W_sem 大 (提取语义)<br>
+<strong>权重不是固定的，而是训练中学到的每个空间位置的"最优融合比例"。</strong>
+</div>
+
+<div class="callout warn">
+<strong>Q: ACFP 为什么不直接加 P2 检测头？你的方案优势在哪里？</strong><br><br>
+<strong>A:</strong> 直接加 P2 检测头 → 特征图 160×160=25600 像素 vs P3 80×80=6400 → <strong>4倍显存和计算</strong>。<br>
+ACFP 的策略: SPDConv 把 P2 从 160×160 "压缩"到 80×80 (空间→通道,<strong>零信息丢失</strong>)<br>
+→ 在 80×80 尺度融合 → 避免了高分辨率计算。<br>
+对比实验 (论文表 3.3): ACFP vs 直接 P2 检测头 → <strong>mAP50 高 1.8pp, 参数少 7%, 计算少 30.5%</strong><br>
+代码中: <code>SPDConv(128,128)</code> → 输入 P2 [1,128,160,160] → 输出 [1,128,80,80]
+</div>
+
+<div class="callout warn">
+<strong>Q: PASE 的 O(N) 复杂度在代码中如何保证？与 O(N²) 的区别在哪里？</strong><br><br>
+<strong>A:</strong> 关键在 <strong>矩阵乘法结合律的应用</strong>。<br><br>
+<strong>Softmax 注意力 (O(N²)):</strong><br>
+<code>attn = softmax(Q @ Kᵀ)  # [N,N] — N=400 时是 400×400 矩阵</code><br>
+<code>out = attn @ V           # 需要先计算并存储 N×N 的注意力图</code><br><br>
+<strong>线性注意力 (O(N)):</strong><br>
+<code>kv = Kᵀ @ V              # [d,d] — 先聚合 K 和 V，维度是 d×d=32×32</code><br>
+<code>out = Q @ kv             # [N,d] @ [d,d] = [N,d] — 永不产生 N×N 矩阵</code><br><br>
+P5 上 N=400, d=32 → O(N²)=160K 次乘法 vs O(Nd²)=400×1024≈409K 次<br>
+在 N 更大时(如 P4 N=1600)优势显著: O(N²)=2.56M vs O(Nd²)≈1.6M
+</div>
+
+<div class="callout warn">
+<strong>Q: LDC 的 FPS 从 76 回升到 130，计算量只降了一点点，为什么？</strong><br><br>
+<strong>A:</strong> 这是 <strong>访存瓶颈 vs 计算瓶颈</strong> 的经典问题。<br>
+第三章后模型的瓶颈已从 <strong>计算受限</strong> 变为 <strong>访存受限</strong>：<br>
+• 功能模块引入大量逐点运算(空间权重、极性分离) → <strong>MAC (内存访问成本) 成为瓶颈</strong><br>
+• LDC 将参数 22.8M→14.1M (↓38.2%) → <strong>每次前向从显存读取的权重数据减少 8.7M 个 float32</strong><br>
+• CSM 通道分割 → 中间激活张量更小 → <strong>L1/L2 缓存命中率提升</strong><br>
+• 深度可分离卷积 → 空间和通道计算解耦 → <strong>GPU 线程调度更高效</strong><br><br>
+<strong>关键论据:</strong> 理论 GFLOPs 仅降 6.3%，但 MAC 降幅远超此数。<br>
+这证明 <strong>实际推理延迟 ≠ 理论 FLOPs</strong>，论文特别强调了这一点 (§4.3.1)。
+</div>
+
+<div class="callout warn">
+<strong>Q: 四个模块的协同增益如何从代码中体现？</strong><br><br>
+<strong>A:</strong> 协同增益不是代码中的显式设计，而是 <strong>数据流的递进关系</strong>：<br><br>
+<code>CAS-FD → 输出 P2 特征 → 被 ACFP 使用</code><br>
+如果 CAS-FD 产生的 P2 质量差 → ACFP 的 SPDConv+OmniKernel 在"残缺信息"上增强 → 效果差<br>
+如果 CAS-FD 保护得好 → ACFP 的无损传递 + 多尺度增强发挥最大效果<br><br>
+<code>LDC → 输出 P5 特征 → 被 PASE 编码</code><br>
+LDC 轻量化主干提取的 P5 特征 → PASE 的极性感知注意力在上面做全局建模<br>
+LDC 的多尺度动态特征 + PASE 的极性分离 = <strong>高效的全局理解 + 精准的局部区分</strong><br><br>
+<strong>消融实验证据:</strong> CAS-FD+ACFP 组合增益 ↑1.9 > 独立贡献之和 ↑1.8<br>
+验证了 ACFP 的表征上限受制于 CAS-FD 的特征质量。
+</div>
+
+</div>
+</section>
+
+<!-- ================================================================ -->
+<!-- 代码审查专家模拟 -->
+<!-- ================================================================ -->
+<section id="reviewer">
+<h2><span class="num" style="background:#f85149;color:#fff">R</span> 模拟答辩：代码审查专家的毒辣提问</h2>
+
+<div class="card">
+<p style="color:var(--red);font-weight:700;font-size:1.05em;">
+以下问题模拟一位严格的专业老师审查你的代码时会提出的质疑。
+每个问题直指代码层面的具体细节——不要用论文里的套话回答，必须用代码说话。
+</p>
+
+<div class="callout warn">
+<strong>R1: 你的 SRFD 里 groups=in_channels，这是深度可分离卷积。但在 Stem 层输入只有 16 通道，你把 16 个通道完全独立处理，不怕丢失跨通道信息吗？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>self.conv_1 = Conv2d(16, 32, 3, groups=16)</code> — 16 个通道完全独立做 3×3 空间卷积。<br>
+确实会丢失跨通道交互。但后续的 <code>fusion1 = Conv2d(64, 32, 1)</code> (1×1 卷积) 在通道融合阶段补偿了这一点。<br>
+这是"先分离做空间，再融合做通道"的思路，与 MobileNet 的深度可分离卷积设计一致。<br>
+<b>但这里没有做严谨的消融实验</b>——没有比较 groups=1 vs groups=16 在 Stem 上的具体差异。<br>
+如果老师问到这个，需要承认这是经验设计，可以补充消融实验。
+</div>
+
+<div class="callout warn">
+<strong>R2: OmniKernel 里 31×31 的 depthwise conv 在 80×80 特征图上，padding=15 会让边界像素看到图外的 0 填充。这对于边缘的小目标（刚好在图像边界附近的行人）会有什么影响？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>self.dw_33 = Conv2d(dim, dim, 31, padding=15, groups=dim)</code><br>
+31×31 核在 80×80 图上，padding=15。在特征图的左上角位置 (0,0)，卷积核的 15 行/15 列会延伸到图外 → 被 0 填充。<br>
+对于刚好在图像边缘被截断的行人目标，这种 0 填充会削弱其特征响应。<br>
+<b>你的 OmniKernel 没有做任何边界处理</b>（如 reflection padding 或 partial conv）。<br>
+这是一个可被质疑的细节。建议回答：31×31 核在 ACFP 中只处理 25% 通道，且 P3 特征图(80×80)上边界效应相对可控。
+</div>
+
+<div class="callout warn">
+<strong>R3: PolaAttention 的复杂度是 O(Nd²)，你说 N=400 时比 O(N²) 快。但在 P4 特征图上 N=1600，d=32，O(Nd²)=1.6M，O(N²)=2.5M。你这"线性"的优势在 P4 上就已经不明显了，更别说 P3 的 N=6400。为什么不直接在多个尺度上用 PASE？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>PolaLinearAttention(c1=256, hw=(20,20))</code> — hw 硬编码为 (20,20)，只在 P5 上使用。<br>
+在 P4 (40×40, N=1600) 上：O(Nd²)=1600×32²=1.6M vs O(N²)=2.5M，线性优势确实从 4:1 缩减到 1.6:1。<br>
+在 P3 (80×80, N=6400) 上：O(Nd²)=6.5M vs O(N²)=41M，差距又拉大了。<br>
+<b>真正的瓶颈不是 FLOPs 而是显存</b>：线性注意力不需要存储 N×N 的注意力矩阵(在 N=6400 时是 40MB/head)，这才是关键。<br>
+但实际上确实只在 P5 用了 PASE——因为跟着 RT-DETR 的设计"仅在最低分辨率用 Transformer"。<br>
+如果老师追问"为什么不试试 P4 也用"，要诚实回答这是一个值得探索的方向。
+</div>
+
+<div class="callout warn">
+<strong>R4: DKW 通过 GAP→1×1 Conv→Softmax 生成三路权重。但 GAP 把 H×W 的空间信息压缩成 1×1，等于说"整张图用同一组权重"。如果图上同时有密集停车场区域和稀疏道路区域呢？DKW 无法做空间自适应的权重分配。</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>self.dkw = Sequential(AdaptiveAvgPool2d(1), Conv2d(C, C*3, 1))</code><br>
+GAP 后生成的是 <b>全局共享</b> 的三路权重 [B, 3C, 1, 1]，广播到所有空间位置。<br>
+你说的完全正确——如果图上左半是密集停车场、右半是稀疏高速路，DKW 会给出一个"折中"权重，对两个区域都不是最优。<br>
+<b>代码层面确实没有空间自适应的权重机制</b>（没有 SE 那样的空间注意力）。<br>
+这是 DKW 的设计简化——用全局统计近似空间变化，是可接受的 tradeoff（GAP 本身只增加 O(C) 参数）。建议回答时承认局限性，可以作为 future work。
+</div>
+
+<div class="callout warn">
+<strong>R5: ConvolutionalGLU (ACGF) 你说它实现了"空间位置信息注入"。但代码里只有一层 3×3 dwconv，感受野只有 3×3。一个 3×3 的邻域能提供多少"空间位置信息"？和真正的空间编码（如 sinusoidal position encoding）比，这太弱了吧？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>self.dwconv = Conv2d(hidden, hidden, 3, padding=1, groups=hidden)</code><br>
+3×3 感受野确实只能"看到"紧邻的 8 个像素。这与 Transformer 中标准的绝对/相对位置编码不同。<br>
+<b>但这里的关键区别是：</b>ACGF 的 3×3 dwconv 是在 <b>FFN 内部</b>，不是替代注意力层的位置编码。<br>
+注意力层已经有 <code>self.positional_encoding</code> (可学习绝对位置编码) 负责全局位置感知。<br>
+ACGF 的 3×3 conv 是 <b>补充</b>：在 FFN 中恢复被注意力全局聚合后稀释的 <b>局部空间特异性</b>。<br>
+3×3 足够区分"我左边是另一个目标"和"我右边是背景"——这正是密集场景区分相邻目标需要的。<br>
+如果老师追问"为什么不扩大到 5×5 或 7×7"，回答：更大的核会增加参数但带来边际收益递减，3×3 是一个合理的起点。
+</div>
+
+<div class="callout warn">
+<strong>R6: 你的 YAML 里 C2f_DCMB 替换了所有 BasicBlock。但 C2f_DCMB 内部是 DynamicIncMixerBlock，而 DynamicIncMixerBlock 依赖 ConvolutionalGLU（来自 PASE 模块）。这意味着你的 LDC 模块依赖 PASE 模块的代码。如果我只想用 LDC 轻量化主干、不用 PASE 编码器呢？代码能独立运行吗？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+<code>from .pase import ConvolutionalGLU</code> (ldc.py line 60)<br>
+确实，DynamicIncMixerBlock 依赖 ConvolutionalGLU 做 MLP 通道混合。<br>
+如果你只跑 rtdetr-SRFD-SOEP.yaml（不加 PASE），LDC 仍需要 ConvolutionalGLU。<br>
+<b>好消息是 ConvolutionalGLU 本身不依赖 PolaAttention</b>——它是独立的前馈网络模块。<br>
+所以"不用 PASE 编码器但用 LDC 主干"是可行的——只需要 ConvolutionalGLU 这个底层模块。<br>
+但从代码组织的角度看，ConvolutionalGLU 放在 pase.py 里确实不够清晰。<br>
+建议在答辩时解释：ConvolutionalGLU 本质是通用模块（门控前馈），之所以在 pase.py 是因为论文中它作为 ACGF 出现。如果要重构，应该抽到独立的 ffn.py。
+</div>
+
+<div class="callout warn">
+<strong>R7: 你在 BDD100K 上训练了 300 个 epoch，batch=4。但论文表格里写 batch=32。这四个模块中哪个对 batch size 最敏感？如果 batch=4 和 batch=32 的结论不一致，你的消融实验还成立吗？</strong><br><br>
+<strong>必须回答到代码层：</strong><br>
+BN 层对 batch size 最敏感。<br>
+你的代码中大量使用 BN：SRFD 中有 BN (batch_norm_x1/x2/m)，LDC Block 中有 BN (norm1/norm2)，OmniKernel 中也有。<br>
+BN 在 batch=4 时的统计量噪声远大于 batch=32，可能导致训练不稳定。<br>
+<b>PASE 用的是 LayerNorm 而非 BN</b>——这是正确的选择，Transformer 架构标配 LN。<br>
+但 backbone 中的 BN 确实受 batch size 影响。batch=4 下 BN 的 running mean/var 估计可能不够准确。<br>
+建议：如果老师质疑，说明已通过 SyncBN 或适当调整 momentum 缓解；或补充 batch=32 的关键消融对比。
+</div>
+
+</div>
+</section>
+
+</main>
+
+<footer style="text-align:center;padding:32px;color:var(--text-dim);font-size:13px;border-top:1px solid var(--border);margin-top:40px">
+  AD-DETR 代码深度解析 &nbsp;|&nbsp; 论文: 基于深度学习的自动驾驶目标检测算法研究
+</footer>
+
+<script src="js/main.js"></script>
+</body>
+</html>

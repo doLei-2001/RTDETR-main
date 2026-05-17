@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AD-DETR 论文答辩</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+ --w:1100px; --blue:#1a4480; --green:#0b6b38; --orange:#b84a08;
+ --purple:#4c1d9e; --red:#a01e1e; --bg:#e7eaf0;
+}
+body{
+ font-family:'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif;
+ background:var(--bg); display:flex; flex-direction:column; align-items:center;
+ padding:20px 0 80px; gap:30px;
+}
+.slide{
+ width:var(--w); min-height:700px; background:#fff; border-radius:5px;
+ box-shadow:0 5px 30px rgba(0,0,0,.13); padding:38px 46px 0;
+ position:relative; overflow:hidden; display:flex; flex-direction:column;
+ page-break-after:always;
+}
+.slide::before{content:'';position:absolute;top:0;left:0;width:100%;height:4px;background:var(--blue)}
+.slide.g::before{background:var(--green)} .slide.o::before{background:var(--orange)}
+.slide.p::before{background:var(--purple)} .slide.r::before{background:var(--red)}
+.sn{position:absolute;bottom:10px;right:20px;font-size:10px;color:#bbb}
+
+/* title */
+.ts{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;
+ background:linear-gradient(145deg,#f8f9ff 0%,#dde6f5 40%,#cdd8ec 100%)}
+.ts h1{font-size:30px;color:#111;line-height:1.4;margin-bottom:4px}
+.ts .en{font-size:14px;color:#888;font-style:italic;margin-bottom:18px}
+.ts .meta{font-size:14px;color:#666}
+
+/* section divider */
+.sd{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;color:#fff}
+.sd h1{font-size:30px;margin-bottom:10px}
+.sd .sub{font-size:14px;opacity:.85;line-height:1.7}
+.sd .tagline{display:inline-block;padding:4px 14px;border-radius:15px;font-size:11px;margin-bottom:10px;font-weight:500}
+
+h2{font-size:20px;color:var(--blue);margin-bottom:10px;letter-spacing:.5px}
+.g h2{color:var(--green)} .o h2{color:var(--orange)}
+.p h2{color:var(--purple)} .r h2{color:var(--red)}
+h3{font-size:14px;color:#333;margin:8px 0 4px}
+
+/* ── speaker notes bar ── */
+.nb{
+ margin:0 -46px 0; padding:10px 46px;
+ background:linear-gradient(135deg,#fef9ed 0%,#fdf4db 100%);
+ border-top:1.5px solid #e0ce90; font-size:11px; color:#5c4810; line-height:1.8;
+ min-height:46px; flex-shrink:0;
+}
+.nb strong{color:#8b6914;font-size:11px}
+.nb .n{display:inline-block;background:#e0ce90;color:#5c4810;border-radius:50%;width:17px;height:17px;
+ text-align:center;line-height:17px;font-size:10px;font-weight:700;margin-right:4px;flex-shrink:0}
+.nb p{margin:1px 0;display:flex;align-items:flex-start;gap:4px}
+
+/* ── layout ── */
+.r{display:flex;gap:20px;flex:1;min-height:0;margin-bottom:4px}
+.c{flex:1;display:flex;flex-direction:column;min-height:0}
+.w2{flex:1.4} .w3{flex:1.6} .n1{flex:.78} .n2{flex:.88}
+
+/* ── cards ── */
+.cd{background:#f6f8fc;border-radius:7px;padding:10px 13px;border-left:3px solid var(--blue);margin-bottom:6px}
+.cd.g{border-left-color:var(--green)} .cd.o{border-left-color:var(--orange)}
+.cd.p{border-left-color:var(--purple)} .cd.r{border-left-color:var(--red)}
+.cd h4{font-size:12px;margin-bottom:2px;color:#222}
+.cd p,.cd li{font-size:11.5px;line-height:1.7;color:#444;margin:0}
+.cd ul{padding-left:15px;line-height:1.75}
+
+/* ── problem / solution ── */
+.ps{display:flex;gap:10px}
+.ps>div{flex:1;border-radius:7px;padding:10px 12px}
+.ps .bad{background:#fff5f5;border-left:3px solid #c0392b}
+.ps .good{background:#f2faf6;border-left:3px solid #1aab6b}
+.ps h4{font-size:11.5px;margin-bottom:3px}
+.ps p,.ps li{font-size:10.5px;line-height:1.65;margin:0;color:#444}
+.ps ul{padding-left:14px}
+
+/* ── concept box ── */
+.cnb{
+ background:#fffdf3; border:1.5px solid #d4a843; border-radius:5px;
+ padding:8px 11px; margin:5px 0; font-size:10px; line-height:1.6; color:#5c3d00;
+}
+.cnb strong{color:#8b6914;font-size:10.5px}
+.cnb .lbl{display:inline-block;background:#d4a843;color:#fff;border-radius:3px;padding:1px 6px;font-size:9px;font-weight:700;margin-right:4px}
+
+/* ── image placeholder for user ── */
+.iph{
+ border:2px dashed #d0d0d0; border-radius:7px; background:#fafafa;
+ display:flex; flex-direction:column; align-items:center; justify-content:center;
+ color:#999; font-size:11px; text-align:center; padding:14px;
+}
+.iph .ttl{font-weight:600;color:#777;margin-bottom:3px}
+.iph .hnt{font-size:10px;color:#bbb}
+
+/* ── images ── */
+.si{width:100%;border-radius:5px;object-fit:contain}
+
+/* ── tables ── */
+table{width:100%;border-collapse:collapse;font-size:10.5px;margin:3px 0}
+th{background:var(--blue);color:#fff;padding:5px 6px;text-align:center;font-weight:500}
+td{padding:4px 6px;text-align:center;border:1px solid #e0e0e0}
+tr:nth-child(even){background:#fafbff}
+.hi{background:#e4f5ea!important;font-weight:600}
+.up{color:var(--green);font-weight:600}
+.dn{color:var(--red)}
+
+/* tags */
+.tg{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.tg.g{background:#e4f5ea;color:var(--green)} .tg.o{background:#fff3e6;color:var(--orange)}
+.tg.p{background:#f0e6ff;color:var(--purple)} .tg.r{background:#ffe8e8;color:var(--red)}
+
+/* flow */
+.fb{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
+.fb>*{flex-shrink:0}
+.bk{display:inline-block;padding:5px 11px;border-radius:4px;font-size:10.5px;font-weight:500;white-space:nowrap;text-align:center}
+.bk.bl{background:#dce6f8;color:var(--blue);border:1.2px solid var(--blue)}
+.bk.gn{background:#d6f0e2;color:var(--green);border:1.2px solid var(--green)}
+.bk.or{background:#fff0e2;color:var(--orange);border:1.2px solid var(--orange)}
+.bk.pp{background:#ece0f8;color:var(--purple);border:1.2px solid var(--purple)}
+.bk.rd{background:#fce2e2;color:var(--red);border:1.2px solid var(--red)}
+.bk.gy{background:#eee;color:#555;border:1.2px solid #aaa}
+.aw{color:#aaa;flex-shrink:0;font-size:13px}
+
+p,li{font-size:12.5px;line-height:1.8;color:#444}
+ul{padding-left:17px}
+
+@media(max-width:1140px){
+ .slide{width:98vw;min-height:auto;padding:28px 18px 0}
+ .nb{margin:0 -18px 0;padding:10px 18px}
+ .r{flex-direction:column}
+}
+@media print{
+ body{background:#fff;padding:0;gap:0}
+ .slide{box-shadow:none;margin:0;page-break-after:always;width:100%}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ 1. 封面 ═══ -->
+<div class="slide ts">
+ <div style="font-size:12px;color:#999;margin-bottom:6px">XXXXXX 硕士学位论文答辩</div>
+ <h1>基于深度学习的自动驾驶<br>目标检测算法研究</h1>
+ <div class="en">AD-DETR: Autonomous Driving DETR<br>面向自动驾驶场景的改进RT-DETR目标检测框架</div>
+ <div style="width:50px;height:1px;background:#ccc;margin:12px 0"></div>
+ <div class="meta">答辩人：XXXXXX &nbsp;|&nbsp; 导师：XXXXXX &nbsp;|&nbsp; 专业：XXXXXX</div>
+ <div class="sn">1 / 18</div>
+</div>
+
+<!-- ═══ 2. 大纲 ═══ -->
+<div class="slide">
+ <h2>汇报大纲</h2>
+ <div class="r">
+  <div class="c">
+   <div class="cd o"><h4>1. 研究背景与核心挑战</h4><p style="font-size:10.5px">自动驾驶感知价值、BDD100K数据集、三大固有挑战</p></div>
+   <div class="cd"><h4>2. AD-DETR整体架构与基线不足</h4><p style="font-size:10.5px">全局认知 + 改进动机溯源</p></div>
+   <div class="cd g"><h4>3. 基于无损特征演变的小目标增强</h4><p style="font-size:10.5px">问题诊断 → CAS-FD源头保护 → ACFP传播保护 → 协同+实验</p></div>
+  </div>
+  <div class="c">
+   <div class="cd p"><h4>4. 基于极性感知的密集场景空间增强</h4><p style="font-size:10.5px">问题诊断 → PASE(PolaAttention+ACGF) → 效果验证</p></div>
+   <div class="cd r"><h4>5. 基于动态卷积的精度保持型轻量化</h4><p style="font-size:10.5px">问题诊断 → LDC(MBDC+CSM) → 轻量化效果</p></div>
+   <div class="cd"><h4>6. 全局实验对比与总结</h4><p style="font-size:10.5px">消融·对比·可视化·创新贡献</p></div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>各位评审老师好。汇报按以下逻辑展开：背景挑战→整体架构→三个改进方向逐一展开(问题→方案→实验)→全局对比→总结。</p>
+ </div>
+ <div class="sn">2 / 18</div>
+</div>
+
+<!-- ═══ 3. 背景+三挑战 ═══ -->
+<div class="slide o">
+ <h2>研究背景：自动驾驶目标检测的三大核心挑战</h2>
+ <div class="r">
+  <div class="c n1">
+   <p style="font-size:11.5px"><strong>目标检测</strong>是自动驾驶感知的底层数据基石，检测精度直接决定后续3D投影与多模态融合的置信度上限。数据集：BDD100K，10万+段驾驶视频，覆盖晴/雨/雪/雾及昼夜，10类标注且约半数存在遮挡。</p>
+   <img src="static/%E8%87%AA%E5%8A%A8%E9%A9%BE%E9%A9%B6%E6%84%9F%E7%9F%A5%E5%9C%BA%E6%99%AF%E7%A4%BA%E4%BE%8B%E5%9B%BE.png" alt="场景示例" class="si" style="max-height:120px;margin-top:4px">
+  </div>
+  <div class="c w2">
+   <div style="display:flex;flex-direction:column;gap:8px;flex:1">
+    <div style="background:#fff6ee;border-radius:7px;padding:11px 14px;border-left:4px solid var(--orange)">
+     <h4 style="font-size:12px;color:var(--orange)">挑战一：远距离小目标感知难</h4>
+     <p style="font-size:10.5px;margin:0">行人/车辆仅占<strong>3-10像素</strong>。步长卷积违反<strong>奈奎斯特采样定理</strong>→高频小目标信号被跳跃跨越→在进入深层网络前发生<strong>不可逆的像素级丢失</strong>。</p>
+    </div>
+    <div style="background:#f8f0ff;border-radius:7px;padding:11px 14px;border-left:4px solid var(--purple)">
+     <h4 style="font-size:12px;color:var(--purple)">挑战二：密集遮挡场景难区分</h4>
+     <p style="font-size:10.5px;margin:0">目标密集排列且相互遮挡，特征<strong>高度同质化</strong>。注意力ReLU截断→约<strong>50%特征交互信息丢失</strong>。FFN仅做逐点MLP→<strong>完全忽略空间位置</strong>。</p>
+    </div>
+    <div style="background:#fff0f0;border-radius:7px;padding:11px 14px;border-left:4px solid var(--red)">
+     <h4 style="font-size:12px;color:var(--red)">挑战三：边缘算力与实时性约束</h4>
+     <p style="font-size:10.5px;margin:0">车载平台<strong>功耗与算力预算极为有限</strong>。标准卷积参数随通道数<strong>平方级增长</strong>。传统轻量化导致特征表达能力显著退化。</p>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>首先介绍研究背景与三大核心挑战。目标检测是自动驾驶感知的底层数据基石，检测精度直接决定后续算法的置信度上限。在实际车载场景中面临三个固有挑战：远距离小目标仅3到10个像素在逐级下采样中特征不可逆丢失、密集排列目标特征高度同质化难以区分、车载算力严格受限。这三个挑战是我研究工作的出发点。</p>
+ </div>
+ <div class="sn">3 / 18</div>
+</div>
+
+<!-- ═══ 4. AD-DETR 总览 + RT-DETR不足 ═══ -->
+<div class="slide g">
+ <h2>AD-DETR 整体架构 & 改进动机</h2>
+ <div class="r">
+  <div class="c w3">
+   <img src="static/AD-DETR%E6%A3%80%E6%B5%8B%E7%AE%97%E6%B3%95%E6%95%B4%E4%BD%93%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="AD-DETR架构" class="si" style="max-height:300px">
+   <div style="display:flex;gap:8px;margin-top:4px;font-size:10px;text-align:center">
+    <div style="flex:1;background:#fff5ee;border-radius:5px;padding:6px;border-top:2px solid var(--orange)"><strong>① 替换Stem</strong><br>CAS-FD</div>
+    <div style="flex:1;background:#e4f5ea;border-radius:5px;padding:6px;border-top:2px solid var(--green)"><strong>② 替换CCFM</strong><br>ACFP</div>
+    <div style="flex:1;background:#f0e6ff;border-radius:5px;padding:6px;border-top:2px solid var(--purple)"><strong>③ 替换AIFI</strong><br>PASE</div>
+    <div style="flex:1;background:#ffe8e8;border-radius:5px;padding:6px;border-top:2px solid var(--red)"><strong>④ 替换BasicBlock</strong><br>LDC</div>
+   </div>
+  </div>
+  <div class="c n1">
+   <h4 style="font-size:12px;margin-bottom:4px">基线RT-DETR的五个局限 → 四个改进模块</h4>
+   <table style="font-size:9.5px">
+    <tr><th>组件</th><th>原始设计</th><th>自动驾驶场景局限</th></tr>
+    <tr><td><strong>Stem</strong></td><td>7×7 Conv(s=2)+MaxPool(s=2)</td><td>4倍降采样→3-10px小目标<strong>不可逆丢失</strong></td></tr>
+    <tr><td><strong>Backbone</strong></td><td>ResNet-18 BasicBlock 标准Conv</td><td>参数冗余→<strong>平方级增长</strong>；固定核无自适应</td></tr>
+    <tr><td><strong>AIFI</strong></td><td>SA O(N²)→仅S5可用；ReLU截断</td><td>浅层缺全局上下文；<strong>50%负值信息丢失</strong></td></tr>
+    <tr><td><strong>CCFM</strong></td><td>Concat固定权重 仅P3~P5</td><td>P3已压缩至&lt;1px；<strong>无法动态调整</strong></td></tr>
+    <tr><td><strong>FFN</strong></td><td>逐点MLP 仅通道维变换</td><td><strong>完全忽略空间位置</strong>→密集目标同质化</td></tr>
+   </table>
+   <div style="display:flex;gap:4px;margin-top:3px;font-size:9px"><span class="tg o">→CAS-FD</span><span class="tg g">→ACFP</span><span class="tg p">→PASE</span><span class="tg r">→LDC</span></div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>先给出AD-DETR整体架构。以RT-DETR-r18为基线，进行了四处关键替换。右侧表格展示了基线RT-DETR五个组件在自动驾驶场景下的具体局限，每个局限直接对应一个改进模块。接下来按"问题诊断→解决方案→实验验证"的逻辑逐一展开三个改进方向。</p>
+ </div>
+ <div class="sn">4 / 18</div>
+</div>
+
+<!-- ════════════ 5. Part分隔: 小目标 ════════════ -->
+<div class="slide sd" style="background:linear-gradient(145deg,#0b6b38 0%,#043018 100%)">
+ <div class="tagline" style="background:rgba(255,255,255,.15)">Part 1 · 针对挑战一：远距离小目标感知难</div>
+ <h1>基于无损特征演变的小目标特征增强机制</h1>
+ <div class="sub">问题诊断 → CAS-FD源头保护 → ACFP传播保护 → 协同增益<br>从像素空间到语义空间的完整特征保护链</div>
+ <div class="sn" style="color:rgba(255,255,255,.4)">5 / 18</div>
+</div>
+
+<!-- ═══ 6. 问题诊断: 两个子问题 ═══ -->
+<div class="slide o">
+ <h2>问题诊断：小目标特征损失的根源</h2>
+ <div class="r">
+  <div class="c">
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--orange);margin-bottom:8px">
+    <h4 style="font-size:13px;color:var(--orange)">问题① 初始下采样阶段 —— 小目标信息不可逆丢失</h4>
+    <p style="font-size:11px"><strong>发生在哪里？</strong>RT-DETR的Stem层（网络最前端），输入图像(640×640×3) → 7×7 Conv(stride=2, 通道3→64) → 3×3 MaxPool(stride=2) → <strong>连续两次2倍降采样 = 4倍空间压缩</strong>，输出160×160。</p>
+    <p style="font-size:11px;margin-top:4px"><strong>后果：</strong>仅占3-10像素的远距离行人/车辆，其高频边缘和纹理信号被步长卷积<strong>直接跳跃跨越</strong>——单个7×7卷积核的感受野即可完全覆盖并超出小目标的范围。根据<strong>奈奎斯特采样定理</strong>，采样频率低于信号最高频率两倍即发生混叠→微小目标在进入特征金字塔之前已发生<strong>不可恢复的像素级丢失</strong>，后续所有增强均建立在残缺信息基底之上。</p>
+   </div>
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--green);margin-bottom:8px">
+    <h4 style="font-size:13px;color:var(--green)">问题② 特征融合阶段 —— 固定权重无法自适应场景</h4>
+    <p style="font-size:11px"><strong>发生在哪里？</strong>RT-DETR的CCFM模块（主干网络之后、解码器之前）。主干输出S3(80×80·1/8分辨率)、S4(40×40·1/16)、S5(20×20·1/32)三层特征图，CCFM通过自顶向下+自底向上两条路径对这三层做跨尺度融合。</p>
+    <p style="font-size:11px;margin-top:4px"><strong>后果：</strong>融合方式为简单<strong>通道拼接(Concat)</strong>——隐含假设S3/S4/S5三层特征同等重要，每个通道权重为固定1:1:1。但自动驾驶场景中目标尺度剧烈变化——密集小目标场景更依赖浅层S3的空间细节，大目标场景更依赖深层S5的语义抽象——固定权重无法根据场景实际尺度分布<strong>动态调整各层贡献度</strong>。此外，CCFM<strong>仅使用P3~P5三层</strong>，缺乏P2(1/4分辨率)的高分辨率特征层，原图3-10px小目标在P3已被压缩至不足1像素。</p>
+   </div>
+  </div>
+  <div class="c n1">
+   <div class="iph" style="flex:1;min-height:240px;margin-bottom:8px">
+    <span class="ttl">配图建议①：下采样导致小目标特征丢失</span>
+    <span class="hnt">示例：输入图像(640×640,含多个小目标)</span>
+    <span class="hnt">→ 经7×7 stride=2 Conv后的特征图(320×320)</span>
+    <span class="hnt">→ 经MaxPool后的特征图(160×160)</span>
+    <span class="hnt">→ 用红圈标注小目标区域，展示特征响应逐渐减弱/消失</span>
+    <span class="hnt" style="color:var(--orange);margin-top:6px">→ static/prob1_downsample_loss.png</span>
+   </div>
+   <div class="iph" style="flex:1;min-height:220px">
+    <span class="ttl">配图建议②：CCFM固定权重融合的局限</span>
+    <span class="hnt">示例：三层特征图(S3/S4/S5)经Concat拼接</span>
+    <span class="hnt">→ 标注"固定1:1:1权重" vs "期望的自适应权重"</span>
+    <span class="hnt">→ 展示小目标在P3层已被压缩至&lt;1px</span>
+    <span class="hnt" style="color:var(--orange);margin-top:6px">→ static/prob2_ccfm_concat.png</span>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>在介绍改进方案之前，先诊断清楚小目标特征损失到底发生在哪里。一共两个关键阶段。第一个阶段是初始下采样——RT-DETR的Stem层用7乘7步长卷积加最大池化做4倍降采样，3到10个像素的小目标在这两步之后高频信息就不可逆丢失了。从信号处理角度说，这违反了奈奎斯特采样定理。</p>
+  <p><span class="n">2</span>第二个阶段是特征融合——CCFM对主干输出的S3、S4、S5三层做Concat拼接融合，使用固定1比1比1的权重。但在自动驾驶场景中目标尺度剧烈变化，固定权重无法根据场景自适应调整各层贡献。而且CCFM只用了P3到P5三层，缺乏P2的高分辨率信息，小目标在P3已经被压缩到不足一个像素。针对这两个问题，我分别设计了CAS-FD和ACFP两个模块。</p>
+ </div>
+ <div class="sn">6 / 18</div>
+</div>
+
+<!-- ═══ 7. CAS-FD 方案 ═══ -->
+<div class="slide o">
+ <h2>方案① CAS-FD：解决初始下采样信息丢失</h2>
+ <div class="r">
+  <div class="c w3">
+   <img src="static/CAS-FD%E5%86%85%E5%AE%B9%E6%84%9F%E7%9F%A5%E9%80%89%E6%8B%A9%E6%80%A7%E7%89%B9%E5%BE%81%E4%B8%8B%E9%87%87%E6%A0%B7%E6%A8%A1%E5%9D%97%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="CAS-FD" class="si" style="max-height:380px">
+  </div>
+  <div class="c n1">
+   <div class="cd o"><h4>CAS-FD的作用：生成P2层(1/4分辨率)特征图</h4>
+    <p style="font-size:10px;margin:0">它替换了RT-DETR原始的<strong>Stem层</strong>。Stem是网络的第一道关卡——输入是640×640×3的原始图像，输出是160×160尺寸的P2特征图，后续所有Backbone层都在P2基础上继续处理。</p>
+   </div>
+   <div style="display:flex;gap:8px;margin-bottom:6px">
+    <div style="flex:1;background:#fff5f5;border-radius:6px;padding:8px 10px;border:1.5px solid #e0a0a0">
+     <strong style="font-size:10px;color:#c0392b">❌ 原来怎么做？（RT-DETR原始Stem）</strong>
+     <div style="font-size:10px;margin-top:3px;text-align:center;color:#555">
+      输入图像(640×640) <span style="color:#999">→</span> <strong>7×7 Conv(stride=2)</strong> <span style="color:#999">→</span> <strong>MaxPool(stride=2)</strong> <span style="color:#999">→</span> P2特征(160×160)
+     </div>
+     <p style="font-size:9px;margin:4px 0 0;color:#888">两次暴力降采样，步长卷积的窗口直接"跳过"3-10px小目标区域→高频信息不可逆丢失</p>
+    </div>
+    <div style="flex:1;background:#f2faf6;border-radius:6px;padding:8px 10px;border:1.5px solid #80c8a0">
+     <strong style="font-size:10px;color:#1aab6b">✅ 现在怎么做？（CAS-FD）</strong>
+     <div style="font-size:10px;margin-top:3px;text-align:center;color:#555">
+       输入图像 <span style="color:#999">→</span> <strong>三路并行下采样</strong> <span style="color:#999">→</span> <strong>SWN逐像素加权</strong> <span style="color:#999">→</span> P2特征(160×160)
+     </div>
+     <p style="font-size:9px;margin:4px 0 0;color:#888">三路各自保留不同信息(细节/语义/显著性)→SWN为每个像素学习最优的<strong>三路混合比例</strong></p>
+    </div>
+   </div>
+   <div class="ps" style="flex-direction:column;gap:6px">
+    <div class="good"><h4 style="color:#1aab6b">三个核心设计</h4>
+     <ul>
+      <li><strong>① Dual-Stream Stem</strong>：3×3 Conv(局部细节纹理) + 7×7 Conv(大范围上下文) 并行 → 1×1融合，使后续分支建立在更丰富的初始特征上</li>
+      <li><strong>② 三路并行下采样(信息互补)</strong>：<br>· DetB细节分支 — Space-to-Depth像素重排(2×2→4通道)，<strong>零信息损失</strong><br>· SemB语义分支 — 步长DWConv，学习几何形状抽象特征<br>· SalB显著性分支 — MaxPool，保留显著响应、抑制低频噪声</li>
+      <li><strong>③ SWN空间权重网络</strong>：1×1+3×3 Conv → Softmax → 为<strong>每个空间位置(i,j)</strong>生成三路权重{W_sem,W_sal,W_det} → F=Σwᵢ·Fᵢ逐像素自适应融合</li>
+     </ul>
+     <p style="margin-top:3px;font-size:10px"><strong>效果：</strong>小目标密集区域→DetB权重自动调高保留完整像素信息；平滑背景区域→SemB/SalB主导抑制噪声。从源头保护了小目标特征完整性。</p>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>CAS-FD替换RT-DETR的Stem层，从源头解决下采样信息丢失问题。核心设计是Dual-Stream Stem预处理、三路并行下采样实现信息互补、以及SWN空间权重网络实现逐像素的自适应融合。其中最关键的是SWN——它不是全局固定权重，而是为每一个空间位置独立生成三个分支的融合权重，小目标区域详情分支权重自动调高，背景区域语义和显著性分支主导。这比原始SRFD的全局Concat有本质区别。</p>
+ </div>
+ <div class="sn">7 / 18</div>
+</div>
+
+<!-- ═══ 8. ACFP 方案 ═══ -->
+<div class="slide g">
+ <h2>方案② ACFP：解决特征融合自适应不足</h2>
+ <div class="r">
+  <div class="c w3">
+   <img src="static/ACFP%E8%87%AA%E9%80%82%E5%BA%94%E5%8D%8F%E5%90%8C%E8%9E%8D%E5%90%88%E9%87%91%E5%AD%97%E5%A1%94%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="ACFP" class="si" style="max-height:380px">
+  </div>
+  <div class="c n1">
+   <div class="cd g"><h4>ACFP替换RT-DETR的CCFM模块 —— 融合前的数据流</h4>
+    <div style="background:#eaf8f0;border-radius:5px;padding:8px 10px;margin-top:4px;font-size:10px;text-align:center">
+     <strong>CAS-FD输出P2 (160×160×96)</strong> → <strong style="color:var(--green)">SPDConv</strong> (2×2→4通道·零损失) → <strong>P2增强 (80×80)</strong> ↘<br>
+     &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ <strong style="color:var(--blue)">AWM自适应加权</strong> → <strong>增强P3</strong><br>
+     <strong>Backbone自顶向下Y4 (80×80)</strong> →&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→<br>
+     <strong>原始P3特征 (80×80)</strong> →&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→
+    </div>
+    <p style="font-size:10px;margin-top:4px">简单说：P2高分辨率特征→SPDConv无损压到P3尺寸→和Y4(高层语义)、P3(原始基础特征)三路一起→AWM为每个通道动态分配融合权重→增强后再经CAFE多尺度精炼→输出给解码器。</p>
+   </div>
+   <div class="ps" style="flex-direction:column;gap:6px">
+    <div class="good"><h4 style="color:#1aab6b">三个子模块</h4>
+     <ul>
+      <li><strong>① SPDConv无损降维</strong>：接收CAS-FD输出的P2(160×160×96) → 2×2空间块重排为4通道(80×80×384) → 1×1 Conv降至目标通道。<strong>零信息损失</strong>，确保CAS-FD保护的小目标细节在跨尺度传递中不被再次破坏</li>
+      <li><strong>② AWM自适应加权</strong>：接收三路输入——SPDConv增强P2(细粒度细节) + Y4(自顶向下高层语义) + P3(尺度基础表征) → GAP → MLP → Softmax → 为每个通道<strong>动态生成融合权重</strong>，替代CCFM的固定1:1:1 Concat</li>
+      <li><strong>③ CAFE多尺度增强(CSP-OmniKernel)</strong>：全局(GAP·场景级语义指引) + 大核(31×31各向异性·车道/路口结构) + 局部(1×1·高频纹理)三并行分支 → <strong>仅25%通道</strong>经OmniKernel处理，75%恒等映射 → 表达力与效率兼顾</li>
+     </ul>
+     <p style="margin-top:3px;font-size:10px"><strong>关键策略：</strong>不加P2检测头(避免计算量暴增57.2%)，仅在融合阶段通过SPDConv无损引入P2特征。与CAS-FD形成特征保护链：源头保护→传播保护。</p>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>ACFP替换原始CCFM，解决特征融合阶段的两个问题：固定权重和缺P2层。通过SPDConv将P2特征无损降维后引入融合，AWM替代固定Concat实现自适应加权，CAFE做多尺度增强。特别注意设计策略是只引入P2特征参与融合、不加P2检测头，这样精度提升的同时计算量不会暴增。ACFP和CAS-FD形成了完整的特征保护链——CAS-FD从源头保护，ACFP在传播中持续保护。</p>
+ </div>
+ <div class="sn">8 / 18</div>
+</div>
+
+<!-- ═══ 9. 协同 + 消融实验 ═══ -->
+<div class="slide g">
+ <h2>CAS-FD + ACFP 协同增益与消融验证</h2>
+ <div class="r">
+  <div class="c w2">
+   <div style="display:flex;align-items:center;gap:8px;justify-content:center;padding:8px;background:#f6f8fc;border-radius:8px;margin-bottom:8px">
+    <div style="text-align:center;background:#fff5ee;border-radius:8px;padding:9px 12px;border:2px solid var(--orange);font-size:10px"><strong>Stage1 · CAS-FD</strong><br>源头像素保护<br><span style="font-size:9px;color:#888">三路并行+SWN</span></div>
+    <span style="font-size:16px;color:#aaa">→</span>
+    <div style="text-align:center;background:#e4f5ea;border-radius:8px;padding:9px 12px;border:2px solid var(--green);font-size:10px"><strong>Stage2 · ACFP</strong><br>传播自适应融合<br><span style="font-size:9px;color:#888">SPDConv+AWM+CAFE</span></div>
+    <span style="font-size:16px;color:#aaa">→</span>
+    <div style="text-align:center;background:#dce6f8;border-radius:8px;padding:9px 12px;border:2px solid var(--blue);font-size:10px"><strong>完整保护链</strong><br>像素空间→语义空间</div>
+   </div>
+   <h4 style="font-size:12px">协同机理解析</h4>
+   <p style="font-size:11px">ACFP中AWM自适应加权的表征上限<strong>直接受制于输入特征层的细粒度信息质量</strong>。若缺乏CAS-FD在前端对像素信息的无损保护，输入ACFP的P2特征图将携带采样混叠造成的细节缺失→AWM无论如何调整权重，均是在残缺信息基底上进行次优融合。反之仅有CAS-FD而缺ACFP的自适应整合，浅层细节在深层卷积逐级抽象中易被语义信息掩盖。<strong>两模块联合构建了从底层物理像素排列到高层抽象语义表征的完整无损传递路径。</strong></p>
+  </div>
+  <div class="c n1">
+   <img src="static/AWM%E8%87%AA%E9%80%82%E5%BA%94%E5%8A%A0%E6%9D%83%E6%A8%A1%E5%9D%97%E7%BB%93%E6%9E%84.png" alt="AWM" class="si" style="max-height:200px;margin-bottom:6px">
+   <div class="cd g"><h4>消融验证 (BDD100K)</h4>
+    <table style="font-size:10px">
+     <tr><th>组合</th><th>mAP50</th><th>mAP50:95</th><th>Δ</th></tr>
+     <tr><td>Baseline</td><td>59.6</td><td>32.0</td><td>—</td></tr>
+     <tr><td>+CAS-FD</td><td>60.2</td><td>32.4</td><td class="up">↑0.6</td></tr>
+     <tr><td>+ACFP</td><td>60.8</td><td>32.7</td><td class="up">↑1.2</td></tr>
+     <tr class="hi"><td>CAS-FD+ACFP</td><td>61.5</td><td>33.3</td><td class="up">↑1.9</td></tr>
+    </table>
+    <p style="font-size:9px;color:#888;margin-top:2px">61.5 > (60.2+60.8−59.6)=61.4 → 协同增益验证递进互补关系</p>
+    <div class="iph" style="padding:8px;margin-top:4px">
+     <span class="ttl" style="font-size:10px">效果配图建议：小目标检测改善对比</span>
+     <span class="hnt" style="font-size:9px">Baseline vs +CAS-FD+ACFP的检测结果对比(红框标注小目标)</span>
+     <span class="hnt" style="font-size:9px;color:var(--green)">→ static/effect_smallobj_compare.png</span>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>协同机理：ACFP的自适应加权能力受制于输入特征质量——如果前端没有CAS-FD保护，P2特征已经残缺。消融数据验证了这一点：两模块组合后mAP50为61.5，高于各自独立贡献之和的61.4，说明存在超出简单叠加的协同效应。ACFP单独贡献最大(↑1.2)，说明P2特征的无损引入和自适应融合对精度影响最显著。</p>
+ </div>
+ <div class="sn">9 / 18</div>
+</div>
+
+<!-- ════════════ 10. Part分隔: PASE ════════════ -->
+<div class="slide sd" style="background:linear-gradient(145deg,#4c1d9e 0%,#260d58 100%)">
+ <div class="tagline" style="background:rgba(255,255,255,.15)">Part 2 · 针对挑战二：密集遮挡场景难区分</div>
+ <h1>基于极性感知的密集场景空间增强编码</h1>
+ <div class="sub">问题诊断 → PASE(PolaAttention + ACGF) → 效果验证<br>解决注意力表达退化与空间位置感知缺失的双重瓶颈</div>
+ <div class="sn" style="color:rgba(255,255,255,.4)">10 / 18</div>
+</div>
+
+<!-- ═══ 11. PASE 问题 ═══ -->
+<div class="slide p">
+ <h2>问题诊断：AIFI编码器的双重信息瓶颈</h2>
+ <div class="r">
+  <div class="c">
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--purple);margin-bottom:8px">
+    <h4 style="font-size:13px;color:var(--purple)">瓶颈① ReLU线性注意力的信息截断</h4>
+    <p style="font-size:11px">标准线性注意力用φ(x)=max(x,0)保证核函数非负性。但<strong>当Q与K在某一维度同为负值时，其点积本应为正</strong>(负负得正)，ReLU却将其置零→密集遮挡场景中负值承载目标边缘的差分信息与背景抑制信号→约<strong>50%的特征交互被硬性截断</strong>→相邻相似目标的特征趋于同质化。</p>
+   </div>
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--purple);margin-bottom:8px">
+    <h4 style="font-size:13px;color:var(--purple)">瓶颈② FFN的空间感知缺失</h4>
+    <p style="font-size:11px">原始FFN采用逐点MLP仅在通道维度变换→<strong>完全忽略空间邻域关系</strong>。经注意力全局聚合后，每个token的原始空间位置特异性已被稀释→逐点FFN无法恢复这种空间判别性。拥堵路段中，<strong>空间位置是区分外观高度相似的相邻目标的关键线索</strong>。</p>
+   </div>
+   <div class="cnb"><span class="lbl">概念</span> <strong>O(N²)有多贵？</strong>S5:20×20=400 tokens→O(400²)=16万次计算；S3:80×80=6400 tokens→O(6400²)≈4100万次(S5的256倍)。所以RT-DETR只敢在S5上做自注意力。O(N)线性注意力通过KᵀV先算再乘Q降复杂度，但代价是ReLU截断丢信息。PolaAttention的贡献：<strong>保持O(N)线性复杂度同时恢复被丢的信息</strong>。</div>
+  </div>
+  <div class="c n1">
+   <div class="iph" style="flex:1;min-height:240px;margin-bottom:8px">
+    <span class="ttl">配图建议①：密集遮挡场景示例</span>
+    <span class="hnt">拥挤路口/街道场景，标注出被遮挡的行人/车辆</span>
+    <span class="hnt" style="color:var(--purple);margin-top:6px">→ static/prob3_dense_occlusion.png</span>
+   </div>
+   <div class="iph" style="flex:1;min-height:200px">
+    <span class="ttl">配图建议②：ReLU截断示意</span>
+    <span class="hnt">Q=[+0.5,-0.3], K=[+0.2,-0.4] → 真实点积=0.1+0.12=0.22</span>
+    <span class="hnt">ReLU后: Q₊=[+0.5,0], K₊=[+0.2,0] → 点积=0.1 → 丢失0.12(55%)</span>
+    <span class="hnt" style="color:var(--purple);margin-top:6px">→ static/prob3_relu_truncation.png</span>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>第二部分针对密集遮挡场景。先诊断AIFI编码器的两个信息瓶颈：ReLU线性注意力将负值截断，当Q和K同为负时本应负负得正却被置零，密集遮挡场景中约一半特征交互被硬性截断；FFN逐点MLP完全忽略空间位置关系。针对这两个瓶颈，我设计了PASE编码器。</p>
+ </div>
+ <div class="sn">11 / 18</div>
+</div>
+
+<!-- ═══ 12. PASE 方案 ═══ -->
+<div class="slide p">
+ <h2>方案 PASE：极性感知空间增强编码器</h2>
+ <div class="r">
+  <div class="c w3">
+   <img src="static/PASE%E6%9E%81%E6%80%A7%E6%84%9F%E7%9F%A5%E7%A9%BA%E9%97%B4%E5%A2%9E%E5%BC%BA%E7%BC%96%E7%A0%81%E5%99%A8%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="PASE" class="si" style="max-height:210px">
+   <img src="static/ACGF%E8%87%AA%E9%80%82%E5%BA%94%E9%80%9A%E9%81%93%E9%97%A8%E6%8E%A7%E5%89%8D%E9%A6%88%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="ACGF" class="si" style="max-height:190px;margin-top:4px">
+  </div>
+  <div class="c n1">
+   <div class="cd p"><h4>PASE替换RT-DETR的AIFI编码器层</h4>
+    <p style="font-size:10px">发生在混合编码器阶段。接收Backbone输出的S5特征(20×20×512)，经Input Proj(1×1 Conv)降维至256通道后，送入PASE进行全局建模和特征精炼。</p>
+   </div>
+   <div class="ps" style="flex-direction:column;gap:6px">
+    <div class="good"><h4 style="color:#1aab6b">子模块① PolaAttention — 应对瓶颈①</h4>
+     <ul style="font-size:10px">
+      <li><strong>极性分离</strong>：Q/K各解耦为正负分量Q₊/Q₋、K₊/K₋ → 同号交互M_same=Q₊K₊ᵀ+Q₋K₋ᵀ(找回被丢弃的负值驱动交互) + 异号交互M_oppo=Q₊K₋ᵀ+Q₋K₊ᵀ(互补对比信息)</li>
+      <li><strong>可学习幂次</strong>：power=1+α·σ(W)→对正负分量施加幂次缩放→放大显著特征抑制弱响应→注意力分布从"均匀平滑"变为<strong>接近Softmax的尖锐聚焦</strong></li>
+      <li>利用结合律先算KᵀV→维持<strong>O(N·d²)线性复杂度</strong></li>
+     </ul>
+    </div>
+    <div class="good"><h4 style="color:#1aab6b">子模块② ACGF — 把FFN从"逐点变换"改成"空间-内容协同精炼"</h4>
+     <ul style="font-size:10px">
+      <li><strong>双输入</strong>：主输入X_attn(全局上下文)+辅助输入X_orig(原始空间信息)→空间分支从X_orig提取位置信息注入主分支</li>
+      <li><strong>双向门控</strong>：正向G_fwd=GELU(x')⊙x₂(空间引导内容)+反向G_bwd=GELU(x₂)⊙x'(语义校正空间)→α·G_fwd+β·G_bwd</li>
+      <li><strong>通道自适应</strong>：g=σ(W_g)每个通道独立学习门控强度→最终=g⊙F_bi+(1−g)⊙x₂弹性融合</li>
+     </ul>
+    </div>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>PASE用两个子模块分别应对两个瓶颈。PolaAttention通过极性分离策略将Q和K解耦为正负分量，构建同号和异号双路注意力计算，找回被ReLU丢弃的负值驱动交互信息。可学习幂次函数使注意力分布从均匀平滑变为接近Softmax的尖锐聚焦。ACGF通过双输入设计将原始空间信息注入被注意力稀释的语义特征，双向门控实现空间与内容的互调制。</p>
+ </div>
+ <div class="cnb" style="margin:0 0 6px"><span class="lbl">概念</span> <strong>FFN是什么？MLP又是什么？</strong>Transformer的每一层编码器由两个子层组成：①自注意力层(建模全局关系) + ②<strong>FFN前馈网络层</strong>(对注意力输出做进一步特征变换)。FFN内部就是一个<strong>MLP(多层感知机)</strong>——本质是两层全连接：先把通道数放大4倍(256→1024)做非线性激活(ReLU/GELU)，再压回原通道(1024→256)。<strong>"逐点"的意思是</strong>：对特征图上<strong>每个空间位置</strong>独立做相同的通道变换——只看自己这256个通道的值，<strong>不看周围邻居</strong>。好处是简单高效，坏处是完全不管空间位置关系。<br><strong>为什么在密集场景下这是个问题？</strong>自注意力层已经把全局信息混合了→每个位置的空间特异性被稀释→此时逐点FFN再来一遍"只看自己不看他"→空间位置线索彻底丢失→外观相似的相邻目标无法区分。<strong>ACGF的解决思路：</strong>给FFN加一个"空间输入"(原始特征，空间位置信息还在)，再通过双向门控让空间信息指导内容筛选、内容反过来校正空间→恢复被稀释的空间判别性。</div>
+<div class="sn">12 / 18</div>
+</div>
+
+<!-- ════════════ 13. Part分隔: LDC ════════════ -->
+<div class="slide sd" style="background:linear-gradient(145deg,#a01e1e 0%,#550a0a 100%)">
+ <div class="tagline" style="background:rgba(255,255,255,.15)">Part 3 · 针对挑战三：边缘算力与实时性约束</div>
+ <h1>基于动态卷积的精度保持型主干轻量化</h1>
+ <div class="sub">问题诊断 → LDC(MBDC + CSM) → 轻量化效果<br>解耦空间与通道计算，实现参数大幅压缩而精度不降</div>
+ <div class="sn" style="color:rgba(255,255,255,.4)">13 / 18</div>
+</div>
+
+<!-- ═══ 14. LDC 问题 ═══ -->
+<div class="slide r">
+ <h2>问题诊断：精度-速度矛盾与参数冗余</h2>
+ <div class="r">
+  <div class="c">
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--red);margin-bottom:8px">
+    <h4 style="font-size:13px;color:var(--red)">矛盾：功能模块带来精度，但推理速度骤降</h4>
+    <table style="font-size:10px">
+     <tr><th>指标</th><th>基线</th><th>+三个功能模块</th><th>变化</th></tr>
+     <tr><td>mAP50</td><td>59.6</td><td>62.3</td><td class="up">↑2.7</td></tr>
+     <tr><td>参数(M)</td><td>19.9</td><td>22.8</td><td class="dn">↑14.6%</td></tr>
+     <tr><td>FPS</td><td>136</td><td>76</td><td class="dn">↓44%!</td></tr></table>
+   </div>
+   <div style="background:#fff5f5;border-radius:8px;padding:14px 16px;border-left:4px solid var(--red)">
+    <h4 style="font-size:13px;color:var(--red)">根源：ResNet-18主干的参数冗余</h4>
+    <p style="font-size:11px">ResNet-18有4个stage(Layer1~4)，每个stage含<strong>2个BasicBlock</strong>→共8个Block。每个BasicBlock含<strong>2个标准卷积层</strong>→共16个标准卷积。每个标准卷积C_in·C_out·K²参数 → 以64通道3×3核为例：<strong>64×64×9=36,864参数/层</strong>。问题：标准卷积将<strong>空间滤波与通道融合耦合在一起</strong>，每个输出通道都要一个完整的K×K×C_in三维卷积核→参数量随通道数平方级增长→大量参数冗余。</p>
+    <p style="font-size:11px;margin-top:4px"><strong>策略：</strong>不削弱功能模块(那是精度的保障)，把16个标准卷积全部换成更省参数的轻量化算子。</p>
+   </div>
+  </div>
+  <div class="c n1">
+   <div class="iph" style="flex:1;min-height:220px;margin-bottom:8px">
+    <span class="ttl">配图建议①：精度-速度矛盾</span>
+    <span class="hnt">柱状图或散点图：X轴=FPS, Y轴=mAP50</span>
+    <span class="hnt">标注：Baseline(136FPS,59.6) vs +功能模块(76FPS,62.3)</span>
+    <span class="hnt">→ 目标：移向右上角(高精度+高速度)</span>
+    <span class="hnt" style="color:var(--red);margin-top:6px">→ static/prob4_speed_accuracy.png</span>
+   </div>
+   <div class="iph" style="flex:1;min-height:200px">
+    <span class="ttl">配图建议②：标准卷积 vs 深度可分离卷积</span>
+    <span class="hnt">左侧：标准Conv = K×K×C_in×C_out 三维核</span>
+    <span class="hnt">右侧：DW+PW = K×K×C_in(逐通道) + 1×1×C_in×C_out(跨通道)</span>
+    <span class="hnt">→ 参数对比：36864 vs 4672 (64ch,3×3)</span>
+    <span class="hnt" style="color:var(--red);margin-top:6px">→ static/prob4_conv_vs_dwconv.png</span>
+   </div>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>第三部分解决精度与速度的矛盾。三个功能模块引入后精度提升了2.7个点但速度从136帧降到76帧。瓶颈根源在于ResNet-18的16个标准卷积层——每个标准卷积将空间滤波和通道融合耦合在一起，参数存在大量冗余。解决思路是不削弱功能模块，转而对存在参数冗余的主干网络进行轻量化重构。</p>
+ </div>
+ <div class="sn">14 / 18</div>
+</div>
+
+<!-- ═══ 15. LDC 方案 ═══ -->
+<div class="slide r">
+ <h2>方案 LDC：三步实现精度保持型主干轻量化</h2>
+ <div class="r">
+  <div class="c n1">
+   <div class="cd r"><h4>LDC替换ResNet-18所有8个BasicBlock</h4>
+    <p style="font-size:10px">LDC = C2f_DCMB，嵌入在ResNet-18的Layer1~4中，每个stage原来的2个BasicBlock→2个LDC模块。</p>
+   </div>
+   <div style="display:flex;flex-direction:column;gap:5px">
+    <div style="background:#fff8f2;border-radius:5px;padding:7px 10px;border-left:3px solid var(--orange)">
+     <strong style="font-size:10.5px">第1步 换算子：标准卷积 → 深度可分离卷积</strong>
+     <p style="font-size:10px;margin:2px 0 0">把空间滤波(K×K滑动)和通道混合(加权求和)拆开→先对每个通道单独K×K滤波(DWConv) + 再用1×1做通道融合(PWConv)。<strong>64通道3×3核：36864→4672参数，减少87%。</strong>16个卷积层全这样换→主干参数大降。</p>
+    </div>
+    <div style="background:#fff5f5;border-radius:5px;padding:7px 10px;border-left:3px solid var(--red)">
+     <strong style="font-size:10.5px">第2步 补表达力：单DWConv → MBDC三路并行+DKW</strong>
+     <p style="font-size:10px;margin:2px 0 0">单一DWConv感受野固定→MBDC用三个不同形状DWConv并行：方形K×K(局部纹理)、横向带状1×M(车道线/水平长距)、纵向带状M×1(垂直关系·互补)。<strong>DKW</strong>：GAP→1×1 Conv→Softmax→自适应分配三路权重w₁,w₂,w₃。</p>
+    </div>
+    <div style="background:#f6f8fc;border-radius:5px;padding:7px 10px;border-left:3px solid var(--blue)">
+     <strong style="font-size:10.5px">第3步 再省计算：CSM通道分割</strong>
+     <p style="font-size:10px;margin:2px 0 0">输入特征通道均分为两组(C/2各进一个MBDC并行处理)→拼接+1×1 PWConv跨组融合。<strong>通道减半→深度卷积计算量再降约50%。</strong></p>
+    </div>
+   </div>
+  </div>
+  <div class="c w2">
+   <div style="background:#f6f8fc;border-radius:7px;padding:10px 14px;margin-bottom:8px">
+    <h4 style="font-size:11px;margin-bottom:6px">LDC模块内数据流：输入→处理→输出</h4>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px">
+     <div class="bk gy">输入 [C,H,W] ← 上一层传来</div><div style="color:#999;font-size:14px">↓</div>
+     <div class="bk or">1×1 Conv 通道投影 C→2C</div><div style="color:#999;font-size:14px">↓</div>
+     <div class="bk rd">CSM 通道均分 C/2 | C/2</div><div style="color:#999;font-size:14px">↙ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ↘</div>
+     <div style="display:flex;gap:10px">
+      <div style="background:#ffe8e8;border-radius:4px;padding:5px 8px;text-align:center;font-size:9px"><strong>MBDC (组1)</strong><br>3路DWConv并行<br>DKW生成w₁,w₂,w₃<br>处理C/2通道</div>
+      <div style="background:#ffe8e8;border-radius:4px;padding:5px 8px;text-align:center;font-size:9px"><strong>MBDC (组2)</strong><br>3路DWConv并行<br>DKW生成w₁,w₂,w₃<br>处理C/2通道</div>
+     </div>
+     <div style="color:#999;font-size:14px">↘ &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; ↙</div>
+     <div class="bk gn">Concat + 1×1 PWConv 跨组融合</div><div style="color:#999;font-size:14px">↓</div>
+     <div class="bk gy">输出 [C,H,W] + 残差 → 下一层</div>
+    </div>
+   </div>
+   <div style="display:flex;gap:6px">
+    <img src="static/MBDC%E5%A4%9A%E5%88%86%E6%94%AF%E6%B7%B1%E5%BA%A6%E5%8D%B7%E7%A7%AF%E5%AD%90%E6%A8%A1%E5%9D%97%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="MBDC" class="si" style="flex:1;min-width:0;max-height:150px">
+    <img src="static/CSM%E9%80%9A%E9%81%93%E5%88%86%E5%89%B2%E6%B7%B7%E5%90%88%E5%99%A8%E7%BD%91%E7%BB%9C%E7%BB%93%E6%9E%84.png" alt="CSM" class="si" style="flex:1;min-width:0;max-height:150px">
+   </div>
+   <p style="font-size:9px;color:#888;text-align:center;margin-top:2px">左：MBDC子模块内部结构 &nbsp;|&nbsp; 右：CSM将通道对半分后并行处理再融合</p>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>LDC分三步实现轻量化。第一步把16个标准卷积全换成深度可分离卷积——空间滤波和通道融合分开做，每个卷积的参数从36864降到4672。第二步用MBDC三路并行加动态权重补上单一DWConv表达力不足的缺陷。第三步CSM把通道砍半各自处理再融合，深度卷积计算量再降一半。数据流从输入到输出非常清晰：1乘1投影→通道分割→两个MBDC并行→拼接融合→残差连接输出。</p>
+ </div>
+ <div class="sn">15 / 18</div>
+</div>
+
+<!-- ═══ 16. LDC 效果 ═══ -->
+<div class="slide r">
+ <h2>LDC 轻量化效果与机理分析</h2>
+ <div class="r">
+  <div class="c">
+   <table style="font-size:11px">
+    <tr><th>Method</th><th>Params</th><th>FPS</th><th>mAP50</th><th>mAP50:95</th></tr>
+    <tr><td>RT-DETR-r18 (Baseline)</td><td>19.9M</td><td>136</td><td>59.6</td><td>32.0</td></tr>
+    <tr><td>+功能模块(CAS-FD+ACFP+PASE)</td><td>22.8M</td><td>76</td><td>62.3</td><td>34.1</td></tr>
+    <tr class="hi"><td><strong>AD-DETR (+LDC)</strong></td><td><strong>14.1M</strong></td><td><strong>130</strong></td><td><strong>62.7</strong></td><td><strong>34.5</strong></td></tr>
+   </table>
+   <div style="display:flex;gap:8px;margin-top:6px">
+    <div class="cd g" style="flex:1"><p style="font-size:10px"><strong>vs Baseline：</strong>参数↓29.1% + mAP↑3.1 + FPS仅↓4.4% → 精度·参数·速度<strong>三项协同优化</strong></p></div>
+    <div class="cd" style="flex:1"><p style="font-size:10px"><strong>vs 功能版：</strong>参数↓38.2% + FPS↑71%(76→130) → <strong>完全抵消功能模块开销</strong></p></div>
+   </div>
+  </div>
+  <div class="c">
+   <h4 style="font-size:12px;margin-bottom:4px">为什么计算量微降而FPS大幅回升？</h4>
+   <ul style="font-size:11px">
+    <li><strong>① 参数压缩解除显存带宽瓶颈</strong>：推理延迟并非仅取决于浮点运算量，更受制于<strong>内存访问代价(MAC)</strong>。参数从22.8M→14.1M↓38.2%→权重加载的物理耗时大幅削减→打破访存受限瓶颈</li>
+    <li><strong>② 通道分割提升缓存命中率</strong>：CSM分组使中间激活张量尺寸缩小→更高概率驻留GPU L1/L2高速缓存→减少对低速全局内存的读写延迟</li>
+    <li><strong>③ 算理解耦提升GPU并行度</strong>：DWConv+PWConv解耦+多分支→底层算子更灵活调度至不同计算流并发执行</li>
+   </ul>
+   <p style="font-size:9px;color:#888;margin-top:3px">KITTI跨数据集验证：AD-DETR mAP50 93.3%(↑2.1) | mAP50:95 74.3%(↑2.5) — 泛化性一致</p>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>LDC效果：完整AD-DETR参数14.1M比基线低29.1%，精度62.7比基线高3.1个点，速度130帧仅比基线慢4.4%。三项指标协同优化。为什么计算量仅小幅优化而速度大幅回升？根本原因是参数压缩38%解除了显存带宽瓶颈——推理延迟并非仅由浮点运算决定，更受制于内存访问代价。</p>
+ </div>
+ <div class="sn">16 / 18</div>
+</div>
+
+<!-- ═══ 17. 全局实验 ═══ -->
+<div class="slide">
+ <h2>全局实验验证：消融 · 对比 · 可视化</h2>
+ <div class="r">
+  <div class="c n1">
+   <h4 style="font-size:12px">消融实验 (BDD100K)</h4>
+   <table style="font-size:9.5px">
+    <tr><th>CAS-FD</th><th>ACFP</th><th>PASE</th><th>LDC</th><th>mAP50</th><th>mAP50:95</th><th>FPS</th></tr>
+    <tr><td></td><td></td><td></td><td></td><td>59.6</td><td>32.0</td><td>136</td></tr>
+    <tr><td></td><td>✓</td><td></td><td></td><td>60.8</td><td>32.7</td><td>—</td></tr>
+    <tr><td>✓</td><td></td><td></td><td></td><td>60.2</td><td>32.4</td><td>—</td></tr>
+    <tr><td></td><td></td><td>✓</td><td></td><td>60.3</td><td>32.5</td><td>—</td></tr>
+    <tr><td>✓</td><td>✓</td><td></td><td></td><td>61.5</td><td>33.3</td><td>—</td></tr>
+    <tr style="background:#f0e6ff"><td>✓</td><td>✓</td><td>✓</td><td></td><td><strong>62.3</strong></td><td><strong>34.1</strong></td><td>76</td></tr>
+    <tr class="hi"><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td><strong>62.7</strong></td><td><strong>34.5</strong></td><td><strong>130</strong></td></tr>
+   </table>
+   <p style="font-size:9px;color:#888;margin-top:1px">ACFP贡献最大↑1.2。CAS-FD+ACFP协同61.5>61.4。LDC精度不降反升。</p>
+  </div>
+  <div class="c w2">
+   <h4 style="font-size:12px">对比实验 — 与主流方法 (BDD100K, 同训练)</h4>
+   <table style="font-size:9.5px">
+    <tr><th>Method</th><th>Params</th><th>FPS</th><th>mAP50</th><th>mAP50:95</th></tr>
+    <tr><td>RT-DETR-r18</td><td>19.9</td><td>136</td><td>59.6</td><td>32.0</td></tr>
+    <tr><td>YOLOv8-m</td><td>25.9</td><td>112</td><td>60.3</td><td>32.5</td></tr>
+    <tr><td>YOLOv11-m</td><td>20.1</td><td>121</td><td>60.1</td><td>32.3</td></tr>
+    <tr><td>RT-DETR-r18v2</td><td>19.9</td><td>140</td><td>61.2</td><td>33.2</td></tr>
+    <tr><td>RT-DETR-r50</td><td>31.1</td><td>98</td><td>62.0</td><td>33.6</td></tr>
+    <tr class="hi"><td><strong>AD-DETR (Ours)</strong></td><td><strong>14.1</strong></td><td><strong>130</strong></td><td><strong>62.7</strong></td><td><strong>34.5</strong></td></tr>
+   </table>
+   <div style="display:flex;gap:5px;margin:5px 0">
+    <img src="static/%E7%89%B9%E5%BE%81%E7%83%AD%E5%8A%9B%E5%9B%BE%E5%8F%AF%E8%A7%86%E5%8C%96%E5%AF%B9%E6%AF%94.png" alt="热力图" class="si" style="flex:1;min-width:0;max-height:115px">
+    <img src="static/%E6%A3%80%E6%B5%8B%E7%BB%93%E6%9E%9C%E5%8F%AF%E8%A7%86%E5%8C%96%E5%AF%B9%E6%AF%94.png" alt="检测结果" class="si" style="flex:1;min-width:0;max-height:115px">
+   </div>
+   <p style="font-size:9px;color:#999;text-align:center;margin:0">所有对比方法中<strong>最小参数量(14.1M) + 最高精度(62.7%)</strong>，同时保持130FPS实时推理</p>
+  </div>
+ </div>
+ <div class="nb"><strong>讲稿</strong>
+  <p><span class="n">1</span>全局消融实验验证各模块贡献。ACFP单独贡献最大(↑1.2)。CAS-FD+ACFP的协同增益超出了简单叠加。完整AD-DETR在所有对比方法中以最小参数量取得最高精度，同时保持实时推理。</p>
+ </div>
+ <div class="sn">17 / 18</div>
+</div>
+
+<!-- ═══ 18. 创新总结+致谢 ═══ -->
+<div class="slide">
+ <h2>创新贡献总结</h2>
+ <div style="display:flex;flex-direction:column;gap:8px;flex:1">
+  <div style="display:flex;gap:10px;align-items:stretch">
+   <div style="width:28px;background:var(--green);border-radius:6px;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</div>
+   <div style="flex:1;background:#f6f8fc;border-radius:7px;padding:10px 13px;border-left:3px solid var(--green)">
+    <h4 style="font-size:12px;color:var(--green)">基于无损特征演变的小目标特征增强机制</h4>
+    <p style="font-size:11px"><strong>CAS-FD</strong>三路并行下采样+SWN空间自适应权重→从源头实现像素级信息保护。<strong>ACFP</strong>以SPDConv无损引入P2特征+AWM自适应加权+CAFE多尺度增强→金字塔传播中持续增强。两模块协同构建了<strong>从底层物理像素到高层抽象语义的完整无损演变路径</strong>，解决了远距离小目标在多级下采样中的系统性信息损失。</p>
+   </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:stretch">
+   <div style="width:28px;background:var(--purple);border-radius:6px;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</div>
+   <div style="flex:1;background:#f6f8fc;border-radius:7px;padding:10px 13px;border-left:3px solid var(--purple)">
+    <h4 style="font-size:12px;color:var(--purple)">基于极性感知的密集场景空间增强编码</h4>
+    <p style="font-size:11px"><strong>PASE</strong>替换原始AIFI。PolaAttention以极性分离策略恢复线性注意力丢弃的负值交互信息+可学习幂次实现尖锐注意力→O(N)高效全局建模。ACGF以双输入+双向门控+通道自适应→将空间位置信息注入被注意力稀释的语义特征→<strong>恢复密集目标空间判别性</strong>。</p>
+   </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:stretch">
+   <div style="width:28px;background:var(--red);border-radius:6px;color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</div>
+   <div style="flex:1;background:#f6f8fc;border-radius:7px;padding:10px 13px;border-left:3px solid var(--red)">
+    <h4 style="font-size:12px;color:var(--red)">基于动态卷积的精度保持型主干轻量化</h4>
+    <p style="font-size:11px"><strong>LDC</strong>替换ResNet-18的BasicBlock。MBDC三路DWConv并行+DKW动态权重→多尺度自适应特征提取。CSM通道分割+跨组融合→深度卷积计算量削减约50%。最终<strong>参数↓29.1%、mAP↑3.1、FPS仅↓4.4%</strong>，在所有对比方法中达到最小参数量与最高精度的平衡。</p>
+   </div>
+  </div>
+ </div>
+ <div style="text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid #e8e8e8">
+  <div style="font-size:26px;font-weight:700;color:#222;margin-bottom:2px">感谢聆听</div>
+  <div style="font-size:13px;color:#888">恳请各位评审专家批评指正</div>
+ </div>
+ <div class="sn">18 / 18</div>
+</div>
+
+</body>
+</html>

@@ -67,7 +67,36 @@ class LayerNorm(nn.Module):
         h, w = x.shape[-2:]
         return to_4d(self.body(to_3d(x)), h, w)
 
+# ======================================== PASE-ACGF: SEFN (Spatial-Enhanced FFN) ========================================
+# 【论文映射】对应论文3.4.3节 ACGF (Adaptive Channel-Gated FFN)
+# SEFN = Spatial-Enhanced Feedforward Network = ACGF
+# 功能: 在PASE编码器中替换原始逐点FFN，通过双输入设计将空间位置信息注入语义特征
+# ======================================== PASE-ACGF: SEFN ========================================
+
 class SEFN(nn.Module):
+    """SEFN: Spatial-Enhanced Feedforward Network（空间增强前馈网络）
+
+    【论文映射】对应论文3.4.3节 PASE 中的 ACGF（自适应通道门控前馈网络）
+    ACGF = Adaptive Channel-wise Gated Feedforward，用于替换Transformer原始逐点FFN。
+
+    设计目标：原始FFN仅在通道维度逐点变换，忽略空间位置关系。
+    SEFN通过双输入设计 + 门控机制，将原始特征保留的空间位置信息注入语义特征。
+
+    结构解析：
+    1.【Spatial Branch 空间分支】辅助输入spatial包含编码器原始空间判别信息
+       → AvgPool(2x) → Conv3x3×2 → Upsample → 提取空间上下文特征y
+       （对应论文"下采样-卷积处理-上采样"路径）
+
+    2.【Content Branch 内容分支】主输入x为注意力聚合后的语义特征
+       → 1x1升维 → DWConv → 分割为x1, x2
+
+    3.【门控融合】x1与y拼接融合 → GELU → 与x2逐元素相乘
+       正向门控 G_forward = GELU(x1_fused) ⊙ x2，空间引导内容选择
+       对应论文公式(3.5)的双向交互门控简化版
+
+    输入: x ∈ [B, C, H, W], spatial ∈ [B, C, H, W]
+    输出: [B, C, H, W]
+    """
     def __init__(self, dim, ffn_expansion_factor, bias):
         super(SEFN, self).__init__()
 

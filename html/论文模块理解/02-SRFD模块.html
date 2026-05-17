@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SRFD/CAS-FD: 内容感知选择性下采样</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; background: #f0f2f5; color: #333; padding: 30px; }
+  .container { max-width: 1400px; margin: 0 auto; }
+  h1 { font-size: 2em; color: #1a1a2e; margin-bottom: 8px; }
+  h2 { font-size: 1.5em; color: #2d3a6e; margin: 40px 0 20px; padding-bottom: 10px; border-bottom: 3px solid #e8850c; }
+  h3 { font-size: 1.2em; color: #3a4a7e; margin: 25px 0 12px; }
+  .subtitle { color: #666; margin-bottom: 30px; font-size: 1.05em; line-height: 1.6; }
+
+  .flow-box { background: white; border-radius: 12px; padding: 20px; margin: 15px 0; box-shadow: 0 2px 12px rgba(0,0,0,0.06); overflow-x: auto; }
+
+  .problem-box { background: #fff3e6; border-left: 4px solid #e8850c; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .problem-box h4 { color: #e8850c; margin: 0 0 8px; }
+  .solution-box { background: #e6f7ee; border-left: 4px solid #1aab6b; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+  .highlight-box { background: #e8eeff; border-left: 4px solid #4a6cf7; border-radius: 8px; padding: 16px 20px; margin: 20px 0; }
+
+  .arch-diagram { padding: 20px 10px; font-size: 13px; overflow-x: auto; width: 100%; }
+  .arch-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; justify-content: center; }
+  .arch-row > * { flex-shrink: 0; }
+  .arch-block { background: #4a6cf7; color: white; padding: 10px 18px; border-radius: 8px; font-weight: 500; text-align: center; min-width: 60px; }
+  .arch-block-small { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+  .arch-arrow { color: #999; font-size: 20px; padding: 0 4px; flex-shrink: 0; }
+
+  .branch-flow { display: flex; gap: 30px; justify-content: center; flex-wrap: wrap; padding: 20px 0; }
+  .branch { flex: 1; min-width: 200px; border-radius: 12px; padding: 16px; text-align: center; }
+  .branch h5 { font-size: 14px; margin-bottom: 8px; }
+  .branch .desc { font-size: 12px; color: #555; line-height: 1.6; }
+  .branch-sem { background: #fff3e6; border: 2px solid #e8850c; }
+  .branch-sal { background: #ffe8e8; border: 2px solid #e83a3a; }
+  .branch-det { background: #e6f7ee; border: 2px solid #1aab6b; }
+
+  .code-block { background: #1e1e2e; color: #cdd6f4; border-radius: 8px; padding: 16px; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; overflow-x: auto; margin: 10px 0; }
+  .code-block .comment { color: #6c7086; }
+  .code-block .keyword { color: #cba6f7; }
+  .code-block .func { color: #89b4fa; }
+  .code-block .number { color: #fab387; }
+
+  .swn-flow { display: flex; align-items: center; gap: 10px; justify-content: center; flex-wrap: nowrap; padding: 15px 0; overflow-x: auto; }
+  .swn-flow > * { flex-shrink: 0; }
+  .swn-stage { border: 2px solid #4a6cf7; border-radius: 10px; padding: 10px 16px; text-align: center; background: #f8f9ff; min-width: 100px; }
+  .swn-stage .label { font-weight: 600; color: #2d3a6e; }
+  .swn-stage .detail { font-size: 11px; color: #666; }
+
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 15px 0; }
+  .info-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
+  .info-card h4 { margin-top: 0; color: #2d3a6e; }
+  .info-card ul { padding-left: 20px; line-height: 1.8; }
+
+  .collapse { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px; }
+  .collapse::before { content: '▶'; font-size: 12px; transition: transform 0.2s; color: #e8850c; }
+  .collapse.open::before { transform: rotate(90deg); }
+  .collapse-content { display: none; padding: 10px 0; }
+  .collapse-content.show { display: block; }
+
+  .section-nav { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+  .section-nav a { padding: 8px 16px; background: white; border-radius: 20px; text-decoration: none; color: #e8850c; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .section-nav a:hover { background: #e8850c; color: white; }
+
+  .weight-vis { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 15px; }
+  .weight-map { width: 80px; height: 80px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 12px; text-align: center; }
+  .weight-map .val { font-size: 18px; }
+
+  @media (max-width: 768px) { .info-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="section-nav">
+  <a href="00-目录导航.html">← 返回目录</a>
+  <a href="#problem">问题背景</a>
+  <a href="#srfd">原始SRFD</a>
+  <a href="#casfd">CAS-FD改进</a>
+  <a href="#swn">空间权重网络</a>
+  <a href="#dataflow">数据流</a>
+</div>
+
+<h1>🔄 SRFD / CAS-FD: 内容感知选择性特征下采样</h1>
+<p class="subtitle">解决传统步长下采样在小目标检测中的信息丢失问题，从特征提取源头保护微小目标像素级信息</p>
+
+<h2 id="problem">从问题出发：为什么需要改进下采样？</h2>
+<div class="flow-box">
+  <div class="problem-box">
+    <h4>🔴 核心问题：奈奎斯特采样定理被违反</h4>
+    <p>根据信号处理中的<strong>奈奎斯特采样定理</strong>，当采样频率低于信号最高频率的两倍时，会引发严重的<strong>采样混叠效应</strong>。在深度学习中：</p>
+    <ul style="padding-left:20px;line-height:2;margin-top:8px;">
+      <li>远距离小目标（行人、骑行者）在图像中仅占 <strong>3-10个像素</strong></li>
+      <li>这些目标表现为 <strong>高频信号</strong>（边缘、纹理细节）</li>
+      <li>步长卷积/池化的跳跃采样直接跨越这些微小区域</li>
+      <li>结果：微小目标像素级信息在特征提取初期<strong>不可逆丢失</strong></li>
+    </ul>
+  </div>
+
+  <div class="info-grid" style="margin:0;">
+    <div class="info-card">
+      <h4>❌ Baseline下采样路径</h4>
+      <p style="font-size:14px;color:#555;line-height:1.8;">7×7 Conv (stride=2) → 3×3 MaxPool (stride=2) → 连续BasicBlock下采样</p>
+      <ul>
+        <li>激进的大步长大核卷积</li>
+        <li>小目标信息被"跨越"而过</li>
+        <li>特征同质化 + 背景噪声主导</li>
+      </ul>
+    </div>
+    <div class="info-card" style="border:2px solid #1aab6b;">
+      <h4>✅ CAS-FD改进思路</h4>
+      <p style="font-size:14px;color:#555;line-height:1.8;">三路并行下采样 + 空间自适应权重融合</p>
+      <ul>
+        <li>细节分支：像素重排，零信息损失</li>
+        <li>语义分支：步长卷积，保持抽象感知</li>
+        <li>显著性分支：最大值筛选，抑制噪声</li>
+        <li>空间权重：为每个像素动态分配混合比例</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<h2 id="srfd">原始SRFD模块</h2>
+<div class="flow-box">
+  <h4>📐 SRFD整体结构</h4>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:15px;">
+    <div class="arch-row">
+      <div class="arch-block" style="background:#4a6cf7;">Input<br>3ch, 640×640</div>
+      <span class="arch-arrow">→</span>
+      <div class="arch-block" style="background:#2d6a4f;">7×7 Conv<br>k=7, s=1, p=3</div>
+      <span class="arch-arrow">→</span>
+      <div class="arch-block" style="background:#2d6a4f;">Stage1<br>1→1/2</div>
+      <span class="arch-arrow">→</span>
+      <div class="arch-block" style="background:#e07c24;">Stage2<br>1/2→1/4</div>
+      <span class="arch-arrow">→</span>
+      <div class="arch-block" style="background:#e83a3a;">P2输出<br>96ch, 160×160</div>
+    </div>
+  </div>
+
+  <div class="collapse open" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('show');">
+    <span style="font-weight:600;">📂 查看Stage1（1→1/2下采样）内部结构</span>
+  </div>
+  <div class="collapse-content show">
+    <div class="branch-flow">
+      <div class="branch branch-sem">
+        <h5>ConvD 分支（语义）</h5>
+        <div class="desc">
+          3×3 DWConv (s=1)<br>→ 3×3 DWConv (s=2)<br>→ BN<br>
+          <span style="color:#e8850c;">提取局部几何形状和上下文模式</span>
+        </div>
+      </div>
+      <div class="branch branch-det">
+        <h5>CutD 分支（细节）</h5>
+        <div class="desc">
+          Space-to-Depth (2×2)<br>→ 1×1 Conv<br>→ BN<br>
+          <span style="color:#1aab6b;">像素重排，零信息损失</span>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;padding:8px;background:#f8f9ff;border-radius:8px;">
+      <span style="font-weight:600;">融合方式：</span> Concat(通道拼接) → 1×1 Conv
+    </div>
+  </div>
+
+  <div class="collapse" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('show');">
+    <span style="font-weight:600;">📂 查看Stage2（1/2→1/4下采样）内部结构 — 三路并行</span>
+  </div>
+  <div class="collapse-content">
+    <div class="branch-flow">
+      <div class="branch branch-sem">
+        <h5>Path1: ConvD</h5>
+        <div class="desc">
+          3×3 DWConv (s=1)<br>→ 3×3 DWConv (s=2)<br>→ BN<br>
+          <span style="color:#e8850c;">几何形状与边缘感知</span>
+        </div>
+      </div>
+      <div class="branch branch-sal">
+        <h5>Path2: MaxD</h5>
+        <div class="desc">
+          MaxPool(2,2)<br>→ BN<br>
+          <span style="color:#e83a3a;">保留显著性特征，抑制噪声</span>
+        </div>
+      </div>
+      <div class="branch branch-det">
+        <h5>Path3: CutD</h5>
+        <div class="desc">
+          Space-to-Depth (2×2)<br>→ 1×1 Conv<br>→ BN<br>
+          <span style="color:#1aab6b;">无损像素重排保留高频信息</span>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;padding:8px;background:#f8f9ff;border-radius:8px;">
+      <span style="font-weight:600;">融合方式：</span> Concat(通道拼接) → 1×1 Conv  — 所有位置使用<strong>相同的全局权重</strong>
+    </div>
+  </div>
+</div>
+
+<div class="flow-box" style="background:#fff8f0; border:2px solid #e8850c; margin:20px 0;">
+  <h4 style="color:#e83a3a; margin:0 0 8px;">🎯 关键对比：Baseline的下采样 vs 我的CAS-FD</h4>
+  <table style="width:100%; border-collapse:collapse; margin-top:10px;">
+    <tr><th style="background:#4a6cf7; color:white; padding:8px; text-align:left;">对比维度</th><th style="background:#e83a3a; color:white; padding:8px; text-align:left;">Baseline (ResNet Stem)</th><th style="background:#e8850c; color:white; padding:8px; text-align:left;">原始SRFD</th><th style="background:#1aab6b; color:white; padding:8px; text-align:left;">我的CAS-FD</th></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd; font-weight:600;">下采样策略</td><td style="padding:8px; border:1px solid #ddd;">单一7×7步长卷积+MaxPool</td><td style="padding:8px; border:1px solid #ddd;">三路并行(ConvD+MaxD+CutD)</td><td style="padding:8px; border:1px solid #ddd;">三路并行 + Dual-Stream预处理</td></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd; font-weight:600;">融合方式</td><td style="padding:8px; border:1px solid #ddd;">— (单一通路)</td><td style="padding:8px; border:1px solid #ddd;">全局固定权重(Concat+1×1)</td><td style="padding:8px; border:1px solid #ddd;"><strong>空间自适应权重</strong>(SWN逐像素生成)</td></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd; font-weight:600;">对小目标保护</td><td style="padding:8px; border:1px solid #ddd;">激进跳过，信息丢失严重</td><td style="padding:8px; border:1px solid #ddd;">有Cut分支保护但融合时被背景平均化</td><td style="padding:8px; border:1px solid #ddd;"><strong>逐像素加权</strong>，小目标区域侧重Cut分支</td></tr>
+    <tr><td style="padding:8px; border:1px solid #ddd; font-weight:600;">预处理</td><td style="padding:8px; border:1px solid #ddd;">单7×7 Conv</td><td style="padding:8px; border:1px solid #ddd;">单7×7 Conv</td><td style="padding:8px; border:1px solid #ddd;"><strong>Dual-Stream Stem</strong>(3×3细节+7×7上下文)</td></tr>
+  </table>
+  <div style="margin-top:12px; padding:10px 14px; background:#f0e6ff; border-radius:8px; font-size:13px;">
+    <strong>🎯 答辩要点：</strong>"Baseline使用7×7步长卷积+MaxPool进行快速下采样，对于仅占3-10个像素的小目标而言，这种激进的下采样直接导致其像素级信息不可逆丢失。SRFD虽引入了三路并行下采样，但这种多路融合仍采用全局固定的通道拼接，在大背景小目标的航拍图像中大面积的背景噪声主导了融合权重，导致小目标特征被平均化淹没。于是我提出了CAS-FD：一方面增加Dual-Stream Stem来丰富预处理阶段的特征表达，一方面引入空间权重网络SWN为每个像素动态分配三路权重，使小目标区域的细节分支权重自动调高，背景区域的显著性和语义分支权重占主导，从而实现逐像素的内容感知融合。"
+  </div>
+</div>
+
+<h2 id="casfd">改进：从SRFD到CAS-FD</h2>
+<div class="flow-box">
+  <div class="info-grid" style="margin:0;">
+    <div class="info-card">
+      <h4>SRFD的局限</h4>
+      <ul>
+        <li>三路融合使用简单的通道拼接 → 固定权重</li>
+        <li>大背景小目标图像中，全局权重被大面积背景主导</li>
+        <li>占比小的小目标特征被<i>平均化淹没</i></li>
+        <li>无法为每个空间位置生成差异化权重</li>
+      </ul>
+    </div>
+    <div class="info-card" style="border:2px solid #1aab6b;">
+      <h4>CAS-FD的改进</h4>
+      <ul>
+        <li><strong>双卷积感知预处理</strong>：Dual-Stream Stem</li>
+        <li><strong>空间自适应融合</strong>：不再使用固定权重Concat</li>
+        <li><strong>SWN</strong>：为每个像素生成专属的三路混合权重</li>
+        <li>三路从"同等贡献" → "<strong>内容感知贡献</strong>"</li>
+      </ul>
+    </div>
+  </div>
+
+  <h4 style="margin-top:20px;">🔬 CAS-FD核心改进——空间权重网络（SWN）</h4>
+  <p style="color:#555;line-height:1.6;">SWN通过轻量级卷积为<b>每一个空间位置</b>动态分配三个分支的混合权重，实现像素级自适应融合：</p>
+
+  <div class="swn-flow">
+    <div class="swn-stage">
+      <div class="label">三路Concat</div>
+      <div class="detail">[B, 3C, H, W]</div>
+    </div>
+    <span style="color:#4a6cf7;font-size:20px;">→</span>
+    <div class="swn-stage">
+      <div class="label">1×1 Conv</div>
+      <div class="detail">通道压缩 + 跨分支融合</div>
+    </div>
+    <span style="color:#4a6cf7;font-size:20px;">→</span>
+    <div class="swn-stage">
+      <div class="label">3×3 Conv</div>
+      <div class="detail">感知局部空间上下文</div>
+    </div>
+    <span style="color:#4a6cf7;font-size:20px;">→</span>
+    <div class="swn-stage">
+      <div class="label">1×1 Conv</div>
+      <div class="detail">生成3路权重</div>
+    </div>
+    <span style="color:#4a6cf7;font-size:20px;">→</span>
+    <div class="swn-stage" style="border-color:#1aab6b;">
+      <div class="label">Softmax</div>
+      <div class="detail">归一化，权重和=1</div>
+    </div>
+  </div>
+
+  <div class="weight-vis">
+    <div class="weight-map" style="background:#e8850c;">
+      <span>W_sem</span>
+      <span style="font-size:28px;">w₁</span>
+    </div>
+    <div class="weight-map" style="background:#e83a3a;">
+      <span>W_sal</span>
+      <span style="font-size:28px;">w₂</span>
+    </div>
+    <div class="weight-map" style="background:#1aab6b;">
+      <span>W_det</span>
+      <span style="font-size:28px;">w₃</span>
+    </div>
+    <div class="weight-map" style="background:#4a6cf7;">
+      <span>融合输出</span>
+      <span style="font-size:28px;">= Σwᵢ·Fᵢ</span>
+    </div>
+  </div>
+
+  <div class="highlight-box">
+    <h4>🎯 CAS-FD vs SRFD 的关键区别</h4>
+    <table style="width:100%;border-collapse:collapse;margin-top:10px;">
+      <tr><th style="background:#4a6cf7;color:white;padding:8px;text-align:left;">对比项</th><th style="background:#e8850c;color:white;padding:8px;text-align:left;">SRFD</th><th style="background:#1aab6b;color:white;padding:8px;text-align:left;">CAS-FD</th></tr>
+      <tr><td style="padding:8px;border:1px solid #ddd;"><strong>预处理</strong></td><td style="padding:8px;border:1px solid #ddd;">单7×7卷积</td><td style="padding:8px;border:1px solid #ddd;">Dual-Stream (3×3细节 + 7×7上下文)</td></tr>
+      <tr><td style="padding:8px;border:1px solid #ddd;"><strong>融合方式</strong></td><td style="padding:8px;border:1px solid #ddd;">全局固定权重（Concat+Conv）</td><td style="padding:8px;border:1px solid #ddd;">逐像素自适应权重（SWN生成）</td></tr>
+      <tr><td style="padding:8px;border:1px solid #ddd;"><strong>二级融合</strong></td><td style="padding:8px;border:1px solid #ddd;">简单Concat+1×1 Conv</td><td style="padding:8px;border:1px solid #ddd;">空间自适应融合 + 最终投影</td></tr>
+      <tr><td style="padding:8px;border:1px solid #ddd;"><strong>对小目标保护</strong></td><td style="padding:8px;border:1px solid #ddd;">已被平均化淹没</td><td style="padding:8px;border:1px solid #ddd;">每个像素独立加权保护</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2 id="swn">空间权重网络深入解析</h2>
+<div class="flow-box">
+  <div class="problem-box">
+    <h4>💡 为什么要用空间权重？</h4>
+    <p style="line-height:1.8;">在自动驾驶图像中，不同区域对三种下采样策略的需求不同：</p>
+    <ul style="padding-left:20px;line-height:2;margin-top:8px;">
+      <li><strong>小目标区域</strong>（远端行人、车辆）：需要 DetB 保持完整像素信息 → <span style="color:#1aab6b;">权重偏重DetB</span></li>
+      <li><strong>大目标区域</strong>（近处车辆）：需要 SemB 提取上下文语义 → <span style="color:#e8850c;">权重偏重SemB</span></li>
+      <li><strong>平滑背景区域</strong>（路面、天空）：需要 SalB 抑制噪声 → <span style="color:#e83a3a;">权重偏重SalB</span></li>
+    </ul>
+  </div>
+
+  <div class="code-block">
+<span class="comment"># SWN 前向传播：为每个像素生成三路权重</span>
+<span class="keyword">def</span> <span class="func">forward</span>(self, conv_feat, max_feat, cut_feat):
+    <span class="comment"># 1. 三路特征在通道维度堆叠</span>
+    stack = torch.cat([conv_feat, max_feat, cut_feat], dim=1) <span class="comment"># [B, 3C, H, W]</span>
+
+    <span class="comment"># 2. 轻量级卷积网络 + Softmax 生成空间权重</span>
+    <span class="comment">#    权重图 W 形状：[B, 3, H, W]</span>
+    <span class="comment">#    W[:,0,:,:] → conv权重, W[:,1,:,:] → max权重, W[:,2,:,:] → cut权重</span>
+    spatial_weights = self.spatial_weight_net(stack)
+
+    <span class="comment"># 3. 逐像素加权融合 (element-wise)</span>
+    fused = (conv_feat * spatial_weights[:, 0:1, :, :] +
+             max_feat  * spatial_weights[:, 1:2, :, :] +
+             cut_feat  * spatial_weights[:, 2:3, :, :])
+
+    <span class="keyword">return</span> self.final_proj(fused)  <span class="comment"># 1×1 Conv 最终投影</span>
+  </div>
+</div>
+
+<h2 id="dataflow">完整数据流</h2>
+<div class="flow-box">
+  <div class="arch-diagram">
+    <div class="arch-row">
+      <div class="arch-block" style="background:#4a6cf7;">Input<br>3, 640×640</div>
+      <span class="arch-arrow">→</span>
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="arch-block" style="background:#2d6a4f;">Dual-Stream Stem<br>3→24ch</div>
+        <span style="font-size:10px;color:#888;">3×3 + 7×7 并联 → 1×1融合</span>
+      </div>
+      <span class="arch-arrow">→</span>
+      <div style="border:2px dashed #e07c24;border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-weight:600;color:#e07c24;">Stage1 (1→1/2)</div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <div class="arch-block-small" style="background:#1aab6b;">Cut: 24→48</div>
+          <div class="arch-block-small" style="background:#e8850c;">Conv: 24→48</div>
+        </div>
+        <div style="font-size:11px;color:#888;">Concat+Conv融合</div>
+      </div>
+      <span class="arch-arrow">→</span>
+      <div style="border:2px dashed #7c3aed;border-radius:10px;padding:10px;text-align:center;">
+        <div style="font-weight:600;color:#7c3aed;">Stage2 (1/2→1/4)</div>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <div class="arch-block-small" style="background:#e8850c;">ConvD</div>
+          <div class="arch-block-small" style="background:#e83a3a;">MaxD</div>
+          <div class="arch-block-small" style="background:#1aab6b;">CutD</div>
+        </div>
+        <div style="font-size:11px;color:#888;margin-top:4px;"><strong style="color:#4a6cf7;">SWN空间自适应融合</strong></div>
+      </div>
+      <span class="arch-arrow">→</span>
+      <div class="arch-block" style="background:#e83a3a;">P2输出<br>96ch, 160×160</div>
+    </div>
+  </div>
+</div>
+
+<div class="solution-box">
+  <h4>✅ 本章核心结论</h4>
+  <ul style="padding-left:20px;line-height:1.8;margin-top:6px;">
+    <li>CAS-FD在特征提取<strong>源头</strong>保护了小目标像素级信息</li>
+    <li>三路并行实现了信息互补：语义+显著性+细节的全面覆盖</li>
+    <li>空间权重网络实现了<strong>逐像素</strong>的自适应融合，而非全局固定权重</li>
+    <li>与ACFP模块形成<strong>特征保护链</strong>：源头保护 + 传播保护 = 完整的小目标特征保留</li>
+  </ul>
+</div>
+
+<div style="text-align:center;margin-top:40px;display:flex;justify-content:center;gap:16px;">
+  <a href="01-Baseline-RTDETR.html" style="padding:12px 24px;background:#666;color:white;border-radius:25px;text-decoration:none;font-size:14px;">← 上一步：Baseline</a>
+  <a href="03-SOEP-MFM-ACFP模块.html" style="padding:12px 24px;background:#4a6cf7;color:white;border-radius:25px;text-decoration:none;font-size:14px;">下一步：03 SOEP-MFM/ACFP 金字塔 →</a>
+</div>
+
+</div>
+</body>
+</html>
